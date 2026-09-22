@@ -12,6 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ArExperience, ArHotspot } from '@/constants/destinations';
 import { Colors } from '@/constants/theme';
 
@@ -31,6 +32,17 @@ export function ArExperienceCard({ ar, destId, colors, isDark }: ArExperienceCar
   const [scale, setScale] = useState(1.0);
   const [autoRotate, setAutoRotate] = useState(true);
   const [photoSavedToast, setPhotoSavedToast] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
+
+  const handleModeSwitch = async (mode: '3d' | 'ar') => {
+    if (mode === 'ar') {
+      if (!permission?.granted) {
+        const result = await requestPermission();
+        if (!result.granted) return;
+      }
+    }
+    setActiveMode(mode);
+  };
 
   // Rotation animation
   const rotY = useRef(new Animated.Value(0)).current;
@@ -144,12 +156,12 @@ export function ArExperienceCard({ ar, destId, colors, isDark }: ArExperienceCar
 
             <View style={styles.modeToggle}>
               <TouchableOpacity
-                onPress={() => setActiveMode('3d')}
+                onPress={() => handleModeSwitch('3d')}
                 style={[styles.modeBtn, activeMode === '3d' && styles.modeBtnActive]}>
                 <Text style={[styles.modeBtnText, activeMode === '3d' && styles.modeBtnTextActive]}>3D</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => setActiveMode('ar')}
+                onPress={() => handleModeSwitch('ar')}
                 style={[styles.modeBtn, activeMode === 'ar' && styles.modeBtnActive]}>
                 <Text style={[styles.modeBtnText, activeMode === 'ar' && styles.modeBtnTextActive]}>AR</Text>
               </TouchableOpacity>
@@ -158,17 +170,17 @@ export function ArExperienceCard({ ar, destId, colors, isDark }: ArExperienceCar
 
           {/* ── 3D / AR VIEWPORT ─────────────────────── */}
           <View style={styles.viewport} {...panResponder.panHandlers}>
-            {/* Background: Studio or AR Camera Simulator */}
             {activeMode === 'ar' ? (
-              <View style={styles.arCameraSimulator}>
-                {/* Camera reticle / grid */}
-                <View style={styles.arGridFloor} />
-                <View style={styles.arReticleSquare} />
-                <View style={styles.arBadgeFloating}>
-                  <Ionicons name="videocam-outline" size={13} color="#10B981" />
-                  <Text style={styles.arLiveText}>Surface Detected · Scale 1:1</Text>
+              <CameraView style={StyleSheet.absoluteFill} facing="back">
+                {/* Simulated AR Surface Scanning Reticle */}
+                <View style={styles.arCameraSimulator}>
+                  <View style={styles.arReticleSquare} />
+                  <View style={styles.arBadgeFloating}>
+                    <Ionicons name="videocam-outline" size={13} color="#10B981" />
+                    <Text style={styles.arLiveText}>Surface Detected · Scale 1:1</Text>
+                  </View>
                 </View>
-              </View>
+              </CameraView>
             ) : (
               <View style={styles.studioBg}>
                 <View style={styles.podiumRing} />

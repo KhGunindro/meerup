@@ -62,3 +62,4 @@ translation/.env
 *.pth
 checkpoints/
 models/
+./backend/dataset

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Image,
   Platform,
@@ -7,6 +7,7 @@ import {
   Text,
   View,
   useColorScheme,
+  Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -69,11 +70,30 @@ export function BottomNavBar({ state, navigation }: BottomNavBarProps) {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    
+    const showSubscription = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSubscription = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
   const bottomPadding = Platform.OS === 'web' ? 10 : Math.max(insets.bottom, 10);
 
   const validRoutes = TAB_ORDER.map((tabName) =>
     state.routes.find((route: TabRoute) => route.name === tabName)
   ).filter((route): route is TabRoute => !!route);
+
+  if (isKeyboardVisible && Platform.OS === 'android') {
+    return null;
+  }
 
   return (
     <View

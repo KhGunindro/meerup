@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -7,21 +7,86 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
+  Pressable,
   KeyboardAvoidingView,
   Platform,
+  Animated,
+  Easing,
+  Keyboard,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const AnimatedWaveBar = ({ baseHeight, color, delay }: { baseHeight: number; color: string; delay: number }) => {
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const duration = 800 + (delay % 400);
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: duration,
+          delay: delay,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(anim, {
+          toValue: 0,
+          duration: duration,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [anim, delay]);
+
+  const scaleY = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.6, 1.2],
+  });
+
+  return (
+    <Animated.View
+      style={[
+        styles.waveBar,
+        {
+          height: baseHeight,
+          backgroundColor: color,
+          transform: [{ scaleY }],
+        },
+      ]}
+    />
+  );
+};
 
 export default function MeerupScreen() {
   const insets = useSafeAreaInsets();
   const [aiState, setAiState] = useState<'listening' | 'thinking' | 'speaking'>('listening');
   const [inputText, setInputText] = useState('');
+  const [activeCard, setActiveCard] = useState<'kangla' | 'ima'>('kangla');
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: '#F8FAFC' }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       {/* HEADER */}
       <View style={[styles.header, { paddingTop: insets.top }]}>
@@ -110,19 +175,21 @@ export default function MeerupScreen() {
               <Text style={styles.orbText}>MEERUP</Text>
             </View>
           </TouchableOpacity>
-          {aiState === 'listening' && (
-            <View style={styles.waveformContainer}>
-              <View style={[styles.waveBar, { height: 12, backgroundColor: '#4777c2' }]} />
-              <View style={[styles.waveBar, { height: 20, backgroundColor: '#4777c2' }]} />
-              <View style={[styles.waveBar, { height: 24, backgroundColor: '#275BA5' }]} />
-              <View style={[styles.waveBar, { height: 16, backgroundColor: '#4777c2' }]} />
-              <View style={[styles.waveBar, { height: 28, backgroundColor: '#6B7280' }]} />
-              <View style={[styles.waveBar, { height: 20, backgroundColor: '#4777c2' }]} />
-              <View style={[styles.waveBar, { height: 12, backgroundColor: '#4777c2' }]} />
-              <View style={[styles.waveBar, { height: 20, backgroundColor: '#275BA5' }]} />
-              <View style={[styles.waveBar, { height: 8, backgroundColor: '#6B7280' }]} />
-            </View>
-          )}
+          <View style={styles.waveformContainer}>
+            {aiState === 'listening' && (
+              <>
+                <AnimatedWaveBar baseHeight={12} color="#4777c2" delay={0} />
+                <AnimatedWaveBar baseHeight={20} color="#4777c2" delay={100} />
+                <AnimatedWaveBar baseHeight={24} color="#275BA5" delay={200} />
+                <AnimatedWaveBar baseHeight={16} color="#4777c2" delay={300} />
+                <AnimatedWaveBar baseHeight={28} color="#6B7280" delay={400} />
+                <AnimatedWaveBar baseHeight={20} color="#4777c2" delay={500} />
+                <AnimatedWaveBar baseHeight={12} color="#4777c2" delay={600} />
+                <AnimatedWaveBar baseHeight={20} color="#275BA5" delay={700} />
+                <AnimatedWaveBar baseHeight={8} color="#6B7280" delay={800} />
+              </>
+            )}
+          </View>
         </View>
 
         {/* CHAT TRANSCRIPT */}
@@ -150,67 +217,136 @@ export default function MeerupScreen() {
 
             <View style={styles.aiBubble}>
               <Text style={styles.aiMessageText}>
-                Start with the sacred <Text style={{ color: '#275BA5', fontWeight: 'bold' }}>Kangla Dragon gate</Text> and Govindaji Temple, then walk 8 minutes toward <Text style={{ color: '#4777c2', fontWeight: 'bold' }}>Ima Keithel</Text> for the living heritage of Asia's largest mother-run market. I've mapped a low-traffic walking route for you.
+                {activeCard === 'kangla' ? (
+                  <>
+                    Start with the sacred <Text style={{ color: '#275BA5', fontWeight: 'bold' }}>Kangla Dragon gate</Text> and Govindaji Temple, then walk 8 minutes toward <Text style={{ color: '#4777c2', fontWeight: 'bold' }}>Ima Keithel</Text> for the living heritage of Asia's largest mother-run market. I've mapped a low-traffic walking route for you.
+                  </>
+                ) : (
+                  <>
+                    Experience the vibrant energy of <Text style={{ color: '#4777c2', fontWeight: 'bold' }}>Ima Keithel</Text>, Asia's largest all-women market. Discover traditional textiles and the living heritage of Manipur, just a short walk from the <Text style={{ color: '#275BA5', fontWeight: 'bold' }}>Kangla Royal Enclosure</Text>.
+                  </>
+                )}
               </Text>
 
               {/* CARD 1 */}
-              <View style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.cardImageContainer}>
+              {activeCard === 'kangla' ? (
+                <View style={styles.card}>
+                  <View style={styles.cardHeader}>
+                    <View style={styles.cardImageContainer}>
+                      <Image
+                        source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBkfbqJ9Qq_rORLswzZn7vc7V9fvl5mQGSuqPpdAsQ3P8q9UFOzJML17kKn3gVHAdBxJCtnLlJKtfQG89EA9S1weUmWGUuJnjnQFTpp9NAhyR-NKgza6hqU7xXUGuP2deu5Wf3Kp_l08ix_k5Zz73PGSI5maIZpKmfa5Ik39Chhhxsts8kI8FIx8P5HDKYfhybZ83CDcv4bhAeej_H7lToVkH2prKAo53PBEiNdI-UAGINFmChNlBP5' }}
+                        style={styles.cardImage}
+                      />
+                      <View style={styles.tagOverlay}>
+                        <Text style={styles.tagText}>SACRED</Text>
+                      </View>
+                    </View>
+                    <View style={styles.cardInfo}>
+                      <Text style={styles.cardTitle}>Kangla Royal Enclosure</Text>
+                      <View style={styles.cardStats}>
+                        <MaterialIcons name="near-me" size={14} color="#D97706" />
+                        <Text style={styles.statText}>350m</Text>
+                        <Text style={styles.statDivider}>•</Text>
+                        <MaterialIcons name="schedule" size={14} color="#047857" />
+                        <Text style={styles.statText}>45 min</Text>
+                      </View>
+                      <View style={styles.cardStatus}>
+                        <View style={[styles.statusDot, { backgroundColor: '#047857' }]} />
+                        <Text style={styles.statusText}>Open now · Ceremonial Hours</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.cardActions}>
+                    <TouchableOpacity style={styles.primaryBtn}>
+                      <MaterialIcons name="view-in-ar" size={16} color="white" />
+                      <Text style={styles.primaryBtnText}>Open in AR</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.secondaryBtn}>
+                      <MaterialIcons name="add-location-alt" size={16} color="#D97706" />
+                      <Text style={styles.secondaryBtnText}>Add to Route</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <Pressable style={[styles.card, { flexDirection: 'row', alignItems: 'center' }]} onPress={() => setActiveCard('kangla')}>
+                  <View style={styles.cardImageContainerSmall}>
                     <Image
                       source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBkfbqJ9Qq_rORLswzZn7vc7V9fvl5mQGSuqPpdAsQ3P8q9UFOzJML17kKn3gVHAdBxJCtnLlJKtfQG89EA9S1weUmWGUuJnjnQFTpp9NAhyR-NKgza6hqU7xXUGuP2deu5Wf3Kp_l08ix_k5Zz73PGSI5maIZpKmfa5Ik39Chhhxsts8kI8FIx8P5HDKYfhybZ83CDcv4bhAeej_H7lToVkH2prKAo53PBEiNdI-UAGINFmChNlBP5' }}
                       style={styles.cardImage}
                     />
-                    <View style={styles.tagOverlay}>
-                      <Text style={styles.tagText}>SACRED</Text>
-                    </View>
                   </View>
-                  <View style={styles.cardInfo}>
+                  <View style={styles.cardInfoSmall}>
                     <Text style={styles.cardTitle}>Kangla Royal Enclosure</Text>
-                    <View style={styles.cardStats}>
-                      <MaterialIcons name="near-me" size={14} color="#D97706" />
-                      <Text style={styles.statText}>350m</Text>
-                      <Text style={styles.statDivider}>•</Text>
-                      <MaterialIcons name="schedule" size={14} color="#047857" />
-                      <Text style={styles.statText}>45 min</Text>
-                    </View>
-                    <View style={styles.cardStatus}>
-                      <View style={[styles.statusDot, { backgroundColor: '#047857' }]} />
-                      <Text style={styles.statusText}>Open now · Ceremonial Hours</Text>
-                    </View>
+                    <Text style={styles.cardSubtitle}>Sacred Site · 350m away</Text>
                   </View>
-                </View>
-                <View style={styles.cardActions}>
-                  <TouchableOpacity style={styles.primaryBtn}>
-                    <MaterialIcons name="view-in-ar" size={16} color="white" />
-                    <Text style={styles.primaryBtnText}>Open in AR</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.secondaryBtn}>
-                    <MaterialIcons name="add-location-alt" size={16} color="#D97706" />
-                    <Text style={styles.secondaryBtnText}>Add to Route</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
+                  <View style={styles.cardRightSmall}>
+                    <View style={[styles.vibrantTag, { backgroundColor: '#D1FAE5' }]}>
+                      <Text style={[styles.vibrantTagText, { color: '#065F46' }]}>Open now</Text>
+                    </View>
+                    <Text style={styles.estTimeText}>Est. 45 min</Text>
+                  </View>
+                </Pressable>
+              )}
 
               {/* CARD 2 */}
-              <View style={[styles.card, { flexDirection: 'row', alignItems: 'center' }]}>
-                <View style={styles.cardImageContainerSmall}>
-                  <Image
-                    source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuA6bbhP82G51C-I2l1e27wDmF0iPgnbrbWPcVnG3eFp7Dv6JesrXmd4PJHtsO0_35ALdcqyE7V3D5AFRocYihcRQmHCGtkxqMK0YNLZr_OSKTvjefuFD0_VTihESVNm-q09fp9astfrxTq9ux-z2cVrz3ZE8z39udUkZI9h3NWrwi5fUXRN0JnXG8r_1QsHJC4xRDchgGLmdJoF77wMwrnGRpJUB2WZsgZ_C1ZxYzGAo16Q78ztTBm8' }}
-                    style={styles.cardImage}
-                  />
-                </View>
-                <View style={styles.cardInfoSmall}>
-                  <Text style={styles.cardTitle}>Ima Keithel Market</Text>
-                  <Text style={styles.cardSubtitle}>Living Heritage · 1.1 km away</Text>
-                </View>
-                <View style={styles.cardRightSmall}>
-                  <View style={styles.vibrantTag}>
-                    <Text style={styles.vibrantTagText}>Vibrant now</Text>
+              {activeCard === 'ima' ? (
+                <View style={styles.card}>
+                  <View style={styles.cardHeader}>
+                    <View style={styles.cardImageContainer}>
+                      <Image
+                        source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuA6bbhP82G51C-I2l1e27wDmF0iPgnbrbWPcVnG3eFp7Dv6JesrXmd4PJHtsO0_35ALdcqyE7V3D5AFRocYihcRQmHCGtkxqMK0YNLZr_OSKTvjefuFD0_VTihESVNm-q09fp9astfrxTq9ux-z2cVrz3ZE8z39udUkZI9h3NWrwi5fUXRN0JnXG8r_1QsHJC4xRDchgGLmdJoF77wMwrnGRpJUB2WZsgZ_C1ZxYzGAo16Q78ztTBm8' }}
+                        style={styles.cardImage}
+                      />
+                      <View style={styles.tagOverlay}>
+                        <Text style={styles.tagText}>HERITAGE</Text>
+                      </View>
+                    </View>
+                    <View style={styles.cardInfo}>
+                      <Text style={styles.cardTitle}>Ima Keithel Market</Text>
+                      <View style={styles.cardStats}>
+                        <MaterialIcons name="near-me" size={14} color="#D97706" />
+                        <Text style={styles.statText}>1.1km</Text>
+                        <Text style={styles.statDivider}>•</Text>
+                        <MaterialIcons name="schedule" size={14} color="#047857" />
+                        <Text style={styles.statText}>50 min</Text>
+                      </View>
+                      <View style={styles.cardStatus}>
+                        <View style={[styles.statusDot, { backgroundColor: '#D97706' }]} />
+                        <Text style={[styles.statusText, { color: '#D97706' }]}>Vibrant now · Full Market</Text>
+                      </View>
+                    </View>
                   </View>
-                  <Text style={styles.estTimeText}>Est. 50 min</Text>
+                  <View style={styles.cardActions}>
+                    <TouchableOpacity style={styles.primaryBtn}>
+                      <MaterialIcons name="view-in-ar" size={16} color="white" />
+                      <Text style={styles.primaryBtnText}>Open in AR</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.secondaryBtn}>
+                      <MaterialIcons name="add-location-alt" size={16} color="#D97706" />
+                      <Text style={styles.secondaryBtnText}>Add to Route</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
+              ) : (
+                <Pressable style={[styles.card, { flexDirection: 'row', alignItems: 'center' }]} onPress={() => setActiveCard('ima')}>
+                  <View style={styles.cardImageContainerSmall}>
+                    <Image
+                      source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuA6bbhP82G51C-I2l1e27wDmF0iPgnbrbWPcVnG3eFp7Dv6JesrXmd4PJHtsO0_35ALdcqyE7V3D5AFRocYihcRQmHCGtkxqMK0YNLZr_OSKTvjefuFD0_VTihESVNm-q09fp9astfrxTq9ux-z2cVrz3ZE8z39udUkZI9h3NWrwi5fUXRN0JnXG8r_1QsHJC4xRDchgGLmdJoF77wMwrnGRpJUB2WZsgZ_C1ZxYzGAo16Q78ztTBm8' }}
+                      style={styles.cardImage}
+                    />
+                  </View>
+                  <View style={styles.cardInfoSmall}>
+                    <Text style={styles.cardTitle}>Ima Keithel Market</Text>
+                    <Text style={styles.cardSubtitle}>Living Heritage · 1.1 km away</Text>
+                  </View>
+                  <View style={styles.cardRightSmall}>
+                    <View style={styles.vibrantTag}>
+                      <Text style={styles.vibrantTagText}>Vibrant now</Text>
+                    </View>
+                    <Text style={styles.estTimeText}>Est. 50 min</Text>
+                  </View>
+                </Pressable>
+              )}
             </View>
           </View>
         </View>
@@ -236,7 +372,7 @@ export default function MeerupScreen() {
       </ScrollView>
 
       {/* BOTTOM INPUT */}
-      <View style={[styles.bottomInputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+      <View style={[styles.bottomInputContainer, { paddingBottom: isKeyboardVisible ? 4 : Math.max(insets.bottom, 10) }]}>
         <View style={styles.bottomHeader}>
           <View style={styles.langSelector}>
             <MaterialIcons name="language" size={14} color="#D97706" />

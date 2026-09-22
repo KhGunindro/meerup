@@ -194,21 +194,29 @@ export default function HomeScreen() {
 
         {[
           {
+            id: 'sangai-festival',
+            imgId: 'sangai-festival',
             tag: 'Starts Nov 21 · Imphal Valley',
             name: 'Sangai Festival Preview',
-            desc: 'Manipur\'s flagship celebration of classical Raas Leela, martial arts (Thang-Ta), indigenous water sports, and culinary rituals.',
+            desc: "Manipur's flagship celebration of classical Raas Leela, martial arts (Thang-Ta), indigenous water sports, and culinary rituals.",
             cta: 'RSVP Itinerary',
           },
           {
+            id: 'sangai-festival',
+            imgId: 'thabal',
             tag: 'Dec 3-4 · Imphal Valley',
             name: 'Yaoshang Thabal Chongba',
             desc: 'Traditional moonlit circle dance uniting valley youth under lantern-lit bamboo groves with live percussion.',
             cta: 'Learn More',
           },
         ].map((event) => (
-          <View key={event.name} style={[styles.eventCard, { backgroundColor: cardBg, borderColor: colors.border }]}>
+          <TouchableOpacity
+            key={event.name}
+            activeOpacity={0.92}
+            onPress={() => router.push(('/destination/' + event.id) as any)}
+            style={[styles.eventCard, { backgroundColor: cardBg, borderColor: colors.border }]}>
             <View style={styles.eventImageWrap}>
-              <Image source={getDestImg('')} style={styles.eventImage} resizeMode="cover" />
+              <Image source={getDestImg(event.imgId)} style={styles.eventImage} resizeMode="cover" />
               <View style={styles.eventTagOverlay}>
                 <Ionicons name="calendar" size={11} color="#FFFFFF" />
                 <Text style={styles.eventTag}>{event.tag}</Text>
@@ -219,12 +227,14 @@ export default function HomeScreen() {
               <Text style={[styles.eventDesc, { color: colors.textSecondary }]} numberOfLines={3}>
                 {event.desc}
               </Text>
-              <TouchableOpacity style={[styles.eventCta, { borderColor: colors.primary }]}>
+              <TouchableOpacity
+                style={[styles.eventCta, { borderColor: colors.primary }]}
+                onPress={() => router.push(('/destination/' + event.id) as any)}>
                 <Text style={[styles.eventCtaText, { color: colors.primary }]}>{event.cta}</Text>
                 <Ionicons name="arrow-forward" size={13} color={colors.primary} />
               </TouchableOpacity>
             </View>
-          </View>
+          </TouchableOpacity>
         ))}
       </View>
 
@@ -239,15 +249,18 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <View style={[styles.tasteFeatureCard, { backgroundColor: cardBg, borderColor: colors.border }]}>
-          <Image source={getDestImg('')} style={styles.tasteFeatureImage} resizeMode="cover" />
+        <TouchableOpacity
+          activeOpacity={0.92}
+          onPress={() => router.push(('/destination/chak-hao-singju') as any)}
+          style={[styles.tasteFeatureCard, { backgroundColor: cardBg, borderColor: colors.border }]}>
+          <Image source={getDestImg('chak-hao-singju')} style={styles.tasteFeatureImage} resizeMode="cover" />
           <View style={styles.tasteFeatureOverlay}>
             <View style={[styles.tasteFeatBadge, { backgroundColor: colors.accent }]}>
               <Text style={styles.tasteFeatBadgeText}>Meitei Feast Special</Text>
             </View>
             <Text style={styles.tasteFeatureName}>Chak-hao & Singju Pairing</Text>
           </View>
-        </View>
+        </TouchableOpacity>
 
         {[
           {

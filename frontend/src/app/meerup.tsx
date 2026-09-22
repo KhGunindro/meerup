@@ -21,7 +21,42 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-import { translateText, speechToSpeech, transcribeAudio } from '@/utils/meerupApi';
+import { speechToSpeech, transcribeAudio } from '@/utils/meerupApi';
+
+// ─── Live LLM config (Qwen3 via ngrok) ────────────────────────────────────────
+const LLM_BASE_URL = 'https://ed24-2405-201-ac01-5153-71fa-7687-e166-fa4c.ngrok-free.app/v1';
+const LLM_MODEL = 'lmstudio-community/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M';
+const SYSTEM_PROMPT = `You are MEERUP, a warm and knowledgeable AI travel companion for Manipur, India. 
+Help tourists discover authentic cultural experiences, heritage sites, local food, festivals, and hidden gems. 
+Be concise — respond in 2-4 sentences unless a longer answer is clearly needed. 
+Respond in plain conversational text without markdown formatting.`;
+
+async function askLLM(history: Array<{ role: string; content: string }>, userText: string): Promise<string> {
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...history,
+    { role: 'user', content: userText },
+  ];
+  const res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'ngrok-skip-browser-warning': 'true',
+    },
+    body: JSON.stringify({
+      model: LLM_MODEL,
+      messages,
+      temperature: 0.5,
+      max_tokens: 400,
+      stream: false,
+      enable_thinking: false,
+    }),
+  });
+  if (!res.ok) throw new Error(`LLM ${res.status}`);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content?.trim() ?? "I'm sorry, I couldn't process that.";
+}
+// ───────────────────────────────────────────────────────────────────────────────
 
 let AudioRuntime: typeof Audio | any;
 try {
@@ -96,6 +131,9 @@ interface ChatMessage {
   time: string;
 }
 
+// LLM conversation history (separate from display messages — uses OpenAI roles)
+type LLMHistory = Array<{ role: 'user' | 'assistant'; content: string }>;
+
 export default function MeerupScreen() {
 
   const insets = useSafeAreaInsets();
@@ -107,12 +145,14 @@ export default function MeerupScreen() {
   const [aiState, setAiState] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
   const [inputText, setInputText] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [llmHistory, setLlmHistory] = useState<LLMHistory>([]); // persists context across turns
   const [activeCard, setActiveCard] = useState<'kangla' | 'ima'>('kangla');
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [languagePair, setLanguagePair] = useState<'Manipuri ↔ English' | 'Hindi ↔ Manipuri'>('Manipuri ↔ English');
   const [isMicMuted, setIsMicMuted] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     if (isVoiceMode && aiState === 'idle' && !isMicMuted) {
@@ -123,32 +163,43 @@ export default function MeerupScreen() {
   const toggleLanguagePair = () => {
     setLanguagePair(prev => prev === 'Manipuri ↔ English' ? 'Hindi ↔ Manipuri' : 'Manipuri ↔ English');
   };
-  const handleSendText = async () => {
-    if (!inputText.trim()) return;
-    
-    const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: inputText.trim(), time: 'Just now' };
+  const handleSendText = async (overrideText?: string) => {
+    const text = (overrideText ?? inputText).trim();
+    if (!text) return;
+
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text, time: now };
     setMessages(prev => [...prev, userMsg]);
-    setInputText('');
+    if (!overrideText) setInputText('');
     setAiState('thinking');
-    
-    const response = await translateText(userMsg.text);
-    
-    setAiState('speaking');
-    const aiMsg: ChatMessage = { id: (Date.now()+1).toString(), role: 'ai', text: response.text || "Sorry, I couldn't understand.", time: 'Just now' };
-    setMessages(prev => [...prev, aiMsg]);
-    
-    if (response.audioBase64 && AudioRuntime) {
-      try {
-        const uri = FileSystem.cacheDirectory + 'response.wav';
-        await FileSystem.writeAsStringAsync(uri, response.audioBase64, { encoding: FileSystem.EncodingType.Base64 });
-        const { sound } = await AudioRuntime.Sound.createAsync({ uri });
-        await sound.playAsync();
-      } catch (err) {
-        console.error("Playback error:", err);
-      }
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+
+    try {
+      const reply = await askLLM(llmHistory, text);
+
+      // Update LLM history for multi-turn context
+      setLlmHistory(prev => [
+        ...prev,
+        { role: 'user', content: text },
+        { role: 'assistant', content: reply },
+      ]);
+
+      setAiState('speaking');
+      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'ai', text: reply, time: now };
+      setMessages(prev => [...prev, aiMsg]);
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    } catch (err: any) {
+      console.error('LLM error:', err);
+      const errMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'ai',
+        text: "Sorry, I'm having trouble connecting right now. Please try again.",
+        time: now,
+      };
+      setMessages(prev => [...prev, errMsg]);
+    } finally {
+      setTimeout(() => setAiState('idle'), 1500);
     }
-    
-    setTimeout(() => setAiState('idle'), 2000);
   };
 
 
@@ -309,12 +360,33 @@ export default function MeerupScreen() {
 
       {!isVoiceMode && (
         <>
-      <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+      <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.contentContainer}>
 
 
         {/* CHAT TRANSCRIPT */}
         <View style={styles.chatContainer}>
-          {messages.map((msg, index) => {
+          {messages.length === 0 && (
+            <View style={{ alignItems: 'center', paddingTop: 40, gap: 12 }}>
+              <Text style={{ fontSize: 13, color: '#9CA3AF', textAlign: 'center', lineHeight: 20 }}>
+                Ask MEERUP anything about Manipur’s culture, food, and hidden gems.
+              </Text>
+              {[
+                { icon: 'menu-book', text: 'Tell me the legend of Kangla Sha', color: '#D97706' },
+                { icon: 'restaurant', text: 'Where can I find authentic Chak-hao?', color: '#047857' },
+                { icon: 'festival', text: 'What festivals are happening in Manipur?', color: '#4777c2' },
+              ].map((chip) => (
+                <TouchableOpacity
+                  key={chip.text}
+                  onPress={() => handleSendText(chip.text)}
+                  style={styles.suggestionChip}
+                >
+                  <MaterialIcons name={chip.icon as any} size={16} color={chip.color} />
+                  <Text style={styles.suggestionChipText}>{chip.text}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          {messages.map((msg) => {
             if (msg.role === 'user') {
               return (
                 <View key={msg.id} style={styles.userMessageWrapper}>
@@ -339,15 +411,26 @@ export default function MeerupScreen() {
                   </View>
       
                   <View style={styles.aiBubble}>
-                    <Text style={styles.aiMessageText}>
-                      {msg.text}
-                    </Text>
-                    
+                    <Text style={styles.aiMessageText}>{msg.text}</Text>
                   </View>
                 </View>
               );
             }
           })}
+          {/* Thinking indicator */}
+          {aiState === 'thinking' && (
+            <View style={styles.aiMessageWrapper}>
+              <View style={styles.aiHeader}>
+                <View style={styles.aiAvatar}>
+                  <MaterialIcons name="arrow-back-ios" size={10} color="#4777c2" style={{ marginLeft: 2 }} />
+                </View>
+                <Text style={styles.aiName}>MEERUP Companion</Text>
+              </View>
+              <View style={[styles.aiBubble, { paddingVertical: 12 }]}>
+                <Text style={[styles.aiMessageText, { color: '#9CA3AF', fontStyle: 'italic' }]}>Thinking…</Text>
+              </View>
+            </View>
+          )}
         </View>
 
         
@@ -370,6 +453,9 @@ export default function MeerupScreen() {
               onChangeText={setInputText}
               onFocus={() => setIsInputFocused(true)}
               onBlur={() => setIsInputFocused(false)}
+              onSubmitEditing={() => handleSendText()}
+              returnKeyType="send"
+              editable={aiState !== 'thinking'}
             />
           </View>
 
@@ -971,5 +1057,27 @@ const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  suggestionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: colors.backgroundElement,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 20,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    width: '100%',
+  },
+  suggestionChipText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.text,
+    flexShrink: 1,
   },
 });

@@ -10,6 +10,7 @@ const DEST_IMAGES: Record<string, any> = {
   'govindaji-temple': require('@/assets/images/govindjee-temple.jpg'),
   'sangai-festival':  require('@/assets/images/Sangai festival.png'),
   'chak-hao-singju':  require('@/assets/images/singju.webp'),
+  'thabal':           require('@/assets/images/thabal.webp'),
 };
 
 const fallbackImg = require('@/assets/images/Kangla.png');

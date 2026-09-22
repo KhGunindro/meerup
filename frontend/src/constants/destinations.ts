@@ -34,8 +34,8 @@ export const DESTINATIONS: Destination[] = [
     etiquette:
       "Remove footwear before entering any temple or sacred mound within the complex. Photography inside the Kangla Sha shrine area is strictly prohibited. Dress modestly — shoulders and knees must be covered. Avoid loud noise near the Govindaji shrine precincts. Do not pick flowers or disturb the sacred grove (Uinang Lai). Women on menstruation are traditionally asked to avoid inner sanctums.",
     mapLabel: 'Kangla Complex Map',
-    lat: 24.8170,
-    lng: 93.9368,
+    lat: 24.8080,
+    lng: 93.9400,
   },
   {
     id: 'loktak-lake',
@@ -94,8 +94,8 @@ export const DESTINATIONS: Destination[] = [
     etiquette:
       "Non-Hindus are generally permitted in outer areas; check signage for inner sanctum access. Remove footwear at the entrance. No photography inside the main shrine. Dress in traditional or formal attire -- avoid shorts and sleeveless tops. Maintain silence and turn off mobile ringtones. Do not turn your back to the main deity when leaving.",
     mapLabel: 'Govindaji Temple Map',
-    lat: 24.8141,
-    lng: 93.9362,
+    lat: 24.7978,
+    lng: 93.9485,
   },
   {
     id: 'sangai-festival',
@@ -114,8 +114,8 @@ export const DESTINATIONS: Destination[] = [
     etiquette:
       "Book accommodations at least 3 months in advance. Attend evening performances only if you can maintain respectful silence. Do not enter restricted performance areas. Purchase crafts directly from artisans. For Loktak water sport events, wear life jackets provided by organizers.",
     mapLabel: 'Festival Grounds Map',
-    lat: 24.8170,
-    lng: 93.9368,
+    lat: 24.7960,
+    lng: 93.9490,
   },
   {
     id: 'chak-hao-singju',

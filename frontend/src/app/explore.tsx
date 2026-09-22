@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { Colors, MaxContentWidth } from '@/constants/theme';
 import { getDestImg } from '@/constants/images';
 import { DESTINATIONS } from '@/constants/destinations';
+import { openTurnByTurnNavigation } from '@/utils/navigation';
 
 
 const FILTERS = ['All', 'Sacred Sites', 'Nature', 'Markets', 'Food', 'Festivals'] as const;
@@ -147,7 +148,10 @@ export default function ExploreScreen() {
                   <View style={[styles.categoryTag, { backgroundColor: isDark ? '#1A1C24' : '#F3F4F6' }]}>
                     <Text style={[styles.categoryTagText, { color: colors.textSecondary }]}>{dest.category}</Text>
                   </View>
-                  <TouchableOpacity style={[styles.goBtn, { backgroundColor: colors.primary }]}>
+                  <TouchableOpacity
+                    style={[styles.goBtn, { backgroundColor: colors.primary }]}
+                    accessibilityLabel={`Navigate to ${dest.name}`}
+                    onPress={() => openTurnByTurnNavigation(dest.lat, dest.lng, dest.name)}>
                     <Ionicons name="navigate" size={13} color="#FFF" />
                   </TouchableOpacity>
                 </View>

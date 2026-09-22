@@ -154,12 +154,12 @@ export function BottomNavBar({ state, navigation }: BottomNavBarProps) {
                   style={[
                     styles.specialIconContainer,
                     {
-                      borderColor: isFocused ? colors.accent : colors.border,
-                      backgroundColor: '#070A0F',
+                      borderColor: isFocused ? colors.primary : colors.border,
+                      backgroundColor: '#FFFFFF',
                     },
                   ]}>
                   <Image
-                    source={require('@/assets/images/meerup-emblem.jpg')}
+                    source={require('@/assets/images/ai.png')}
                     style={styles.specialEmblemImage}
                     resizeMode="cover"
                   />
@@ -168,7 +168,7 @@ export function BottomNavBar({ state, navigation }: BottomNavBarProps) {
                   style={[
                     styles.specialLabel,
                     {
-                      color: isFocused ? colors.accent : colors.textSecondary,
+                      color: isFocused ? colors.primary : colors.textSecondary,
                       fontWeight: isFocused ? '800' : '600',
                     },
                   ]}>

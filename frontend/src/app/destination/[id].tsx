@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { getDestImg } from '@/constants/images';
 import { findDestination } from '@/constants/destinations';
+import { openTurnByTurnNavigation, openLocationPin } from '@/utils/navigation';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const HERO_H = 260;
@@ -48,9 +49,12 @@ export default function DestinationDetail() {
     );
   }
 
+  const openNavigation = () => {
+    openTurnByTurnNavigation(dest.lat, dest.lng, dest.name);
+  };
+
   const openMaps = () => {
-    const url = `https://www.google.com/maps/search/?api=1&query=${dest.lat},${dest.lng}`;
-    Linking.openURL(url);
+    openLocationPin(dest.lat, dest.lng);
   };
 
   const cardBg = isDark ? colors.backgroundElement : '#FFFFFF';
@@ -177,16 +181,19 @@ export default function DestinationDetail() {
         {/* ── MAP CARD ─────────────────────────────── */}
         <View style={[styles.mapCard, { backgroundColor: cardBg, borderColor: colors.border }]}>
           {/* Static map placeholder with grid lines */}
-          <View style={[styles.mapPlaceholder, { backgroundColor: isDark ? '#12181F' : '#E8F4F8' }]}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={openNavigation}
+            style={[styles.mapPlaceholder, { backgroundColor: isDark ? '#12181F' : '#E8F4F8' }]}>
             <View style={[styles.mapGrid, { borderColor: isDark ? '#1E2B35' : '#C8DDE8' }]} />
             <View style={[styles.mapGridH, { borderColor: isDark ? '#1E2B35' : '#C8DDE8' }]} />
             <View style={[styles.mapPin, { backgroundColor: '#DC2626' }]}>
               <Ionicons name="location" size={14} color="#FFF" />
             </View>
             <Text style={[styles.mapPlaceholderLabel, { color: colors.textSecondary }]}>
-              {dest.mapLabel}
+              {dest.mapLabel} · Tap to navigate
             </Text>
-          </View>
+          </TouchableOpacity>
 
           {/* Map action buttons */}
           <View style={[styles.mapActions, { borderTopColor: colors.border }]}>
@@ -196,9 +203,9 @@ export default function DestinationDetail() {
               <Ionicons name="map-outline" size={15} color={colors.primary} />
               <Text style={[styles.mapBtnText, { color: colors.primary }]}>{dest.mapLabel}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.mapBtn} onPress={openMaps}>
+            <TouchableOpacity style={styles.mapBtn} onPress={openNavigation}>
               <Ionicons name="navigate" size={15} color={colors.primary} />
-              <Text style={[styles.mapBtnText, { color: colors.primary }]}>Open Navigation</Text>
+              <Text style={[styles.mapBtnText, { color: colors.primary }]}>Start Navigation</Text>
             </TouchableOpacity>
           </View>
         </View>

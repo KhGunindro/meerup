@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, MaxContentWidth } from '@/constants/theme';
 
-export default function ExploreScreen() {
+export default function MapScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
@@ -12,11 +12,11 @@ export default function ExploreScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.content}>
         <View style={[styles.iconCircle, { backgroundColor: colors.backgroundElement }]}>
-          <Ionicons name="compass-outline" size={36} color={colors.primary} />
+          <Ionicons name="map-outline" size={36} color={colors.primary} />
         </View>
-        <Text style={[styles.title, { color: colors.text }]}>Explore Manipur</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Manipur Interactive Map</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Sacred citadels (Kangla Fort), floating islands of Loktak Lake, Ima Keithel, and cultural heritage sites.
+          Live Geofence, Sacred POI navigation (Kangla Fort, Loktak Lake, Ima Keithel), and GPS directions.
         </Text>
       </View>
     </View>

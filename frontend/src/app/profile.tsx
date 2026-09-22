@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { Colors, MaxContentWidth } from '@/constants/theme';
 
-export default function ExploreScreen() {
+export default function ProfileScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
@@ -12,11 +12,11 @@ export default function ExploreScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.content}>
         <View style={[styles.iconCircle, { backgroundColor: colors.backgroundElement }]}>
-          <Ionicons name="compass-outline" size={36} color={colors.primary} />
+          <Ionicons name="person-outline" size={36} color={colors.primary} />
         </View>
-        <Text style={[styles.title, { color: colors.text }]}>Explore Manipur</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Explorer Profile & Preferences</Text>
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Sacred citadels (Kangla Fort), floating islands of Loktak Lake, Ima Keithel, and cultural heritage sites.
+          Language settings (Bhashini translation), Offline Phrasebook & POI cache, and Emergency SOS contact panel.
         </Text>
       </View>
     </View>

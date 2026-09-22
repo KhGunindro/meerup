@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -13,61 +13,278 @@ import {
   Animated,
   Easing,
   Keyboard,
+  Dimensions,
+  StatusBar,
+  useColorScheme,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
+import { translateText, speechToSpeech, transcribeAudio } from '@/utils/meerupApi';
 
-const AnimatedWaveBar = ({ baseHeight, color, delay }: { baseHeight: number; color: string; delay: number }) => {
+let AudioRuntime: typeof Audio | any;
+try {
+  AudioRuntime = require('expo-av').Audio;
+} catch (e) {
+  console.warn("expo-av native module not found. Audio features will be disabled.");
+}
+import { Colors } from '@/constants/theme';
+
+const AnimatedPulseRing = ({ size, color, delay, active }: { size: number; color: string; delay: number; active: boolean }) => {
   const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const duration = 800 + (delay % 400);
-    const loop = Animated.loop(
-      Animated.sequence([
+    if (!active) {
+      anim.setValue(0);
+      return;
+    }
+    
+    let loop: Animated.CompositeAnimation;
+    const timeout = setTimeout(() => {
+      anim.setValue(0);
+      loop = Animated.loop(
         Animated.timing(anim, {
           toValue: 1,
-          duration: duration,
-          delay: delay,
-          easing: Easing.inOut(Easing.ease),
+          duration: 2000,
+          easing: Easing.out(Easing.ease),
           useNativeDriver: true,
-        }),
-        Animated.timing(anim, {
-          toValue: 0,
-          duration: duration,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [anim, delay]);
+        })
+      );
+      loop.start();
+    }, delay);
 
-  const scaleY = anim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.6, 1.2],
-  });
+    return () => {
+      clearTimeout(timeout);
+      if (loop) loop.stop();
+    };
+  }, [active, anim, delay]);
+
+  if (!active) return null;
 
   return (
     <Animated.View
-      style={[
-        styles.waveBar,
-        {
-          height: baseHeight,
-          backgroundColor: color,
-          transform: [{ scaleY }],
-        },
-      ]}
+      style={{
+        position: 'absolute',
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        borderWidth: 2,
+        borderColor: color,
+        opacity: anim.interpolate({
+          inputRange: [0, 0.6, 1],
+          outputRange: [0.8, 0.2, 0],
+        }),
+        transform: [
+          {
+            scale: anim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [1, 1.6],
+            }),
+          },
+        ],
+      }}
     />
   );
 };
 
+
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'ai';
+  text: string;
+  time: string;
+}
+
 export default function MeerupScreen() {
+
   const insets = useSafeAreaInsets();
-  const [aiState, setAiState] = useState<'listening' | 'thinking' | 'speaking'>('listening');
+  const scheme = useColorScheme();
+  const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const isDark = scheme === 'dark';
+  const styles = useMemo(() => getStyles(colors, isDark), [colors, isDark]);
+
+  const [aiState, setAiState] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
   const [inputText, setInputText] = useState('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeCard, setActiveCard] = useState<'kangla' | 'ima'>('kangla');
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+  const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
+  const [languagePair, setLanguagePair] = useState<'Manipuri ↔ English' | 'Hindi ↔ Manipuri'>('Manipuri ↔ English');
+  const [isMicMuted, setIsMicMuted] = useState(false);
+
+  useEffect(() => {
+    if (isVoiceMode && aiState === 'idle' && !isMicMuted) {
+      startRecording();
+    }
+  }, [aiState, isVoiceMode, isMicMuted]);
+
+  const toggleLanguagePair = () => {
+    setLanguagePair(prev => prev === 'Manipuri ↔ English' ? 'Hindi ↔ Manipuri' : 'Manipuri ↔ English');
+  };
+  const handleSendText = async () => {
+    if (!inputText.trim()) return;
+    
+    const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: inputText.trim(), time: 'Just now' };
+    setMessages(prev => [...prev, userMsg]);
+    setInputText('');
+    setAiState('thinking');
+    
+    const response = await translateText(userMsg.text);
+    
+    setAiState('speaking');
+    const aiMsg: ChatMessage = { id: (Date.now()+1).toString(), role: 'ai', text: response.text || "Sorry, I couldn't understand.", time: 'Just now' };
+    setMessages(prev => [...prev, aiMsg]);
+    
+    if (response.audioBase64 && AudioRuntime) {
+      try {
+        const uri = FileSystem.cacheDirectory + 'response.wav';
+        await FileSystem.writeAsStringAsync(uri, response.audioBase64, { encoding: FileSystem.EncodingType.Base64 });
+        const { sound } = await AudioRuntime.Sound.createAsync({ uri });
+        await sound.playAsync();
+      } catch (err) {
+        console.error("Playback error:", err);
+      }
+    }
+    
+    setTimeout(() => setAiState('idle'), 2000);
+  };
+
+
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopRecordingAndThink = async (rec: any) => {
+    setAiState('thinking');
+    if (silenceTimer.current) {
+      clearTimeout(silenceTimer.current);
+      silenceTimer.current = null;
+    }
+    
+    let uri = '';
+    try {
+      if (rec && typeof rec.stopAndUnloadAsync === 'function') {
+        await rec.stopAndUnloadAsync();
+        uri = rec.getURI();
+      }
+    } catch (e) {
+      console.warn("Could not stop recording", e);
+    }
+    setRecording(null);
+    setIsSpeaking(false);
+    
+    if (!uri) {
+      setAiState('idle');
+      return;
+    }
+
+    try {
+      // Call STS endpoint
+      const response = await speechToSpeech(uri);
+      
+      if (response.text) {
+        const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: '(Voice message sent)', time: 'Just now' };
+        const aiMsg: ChatMessage = { id: (Date.now()+1).toString(), role: 'ai', text: response.text, time: 'Just now' };
+        setMessages(prev => [...prev, userMsg, aiMsg]);
+      }
+      
+      setAiState('speaking');
+      if (response.audioBase64 && AudioRuntime) {
+        const outUri = FileSystem.cacheDirectory + 'sts_response.wav';
+        await FileSystem.writeAsStringAsync(outUri, response.audioBase64, { encoding: FileSystem.EncodingType.Base64 });
+        const { sound } = await AudioRuntime.Sound.createAsync({ uri: outUri });
+        await sound.playAsync();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+
+    setTimeout(() => setAiState('idle'), 3000);
+  };
+  
+  const startRecording = async () => {
+    if (!AudioRuntime) {
+      console.warn("Audio is not available - falling back to simulated UI mode");
+      setAiState('listening');
+      setIsSpeaking(true);
+      
+      // User must manually stop recording
+
+      return;
+    }
+    try {
+      const permission = await AudioRuntime.requestPermissionsAsync();
+      if (permission.status === 'granted') {
+        await AudioRuntime.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+
+        const options = {
+          ...AudioRuntime.RecordingOptionsPresets.HIGH_QUALITY,
+          isMeteringEnabled: true,
+        };
+
+        const { recording: newRecording } = await AudioRuntime.Recording.createAsync(
+          options,
+          (status: any) => {
+            if (status.isRecording && 'isMeteringEnabled' in status) {
+              const level = status.metering || -160;
+              if (level > -35) {
+                setIsSpeaking(true);
+                setIsSpeaking(true);
+              } else {
+                setIsSpeaking(false);
+              }
+            }
+          },
+          100
+        );
+
+        setRecording(newRecording);
+        setAiState('listening');
+      }
+    } catch (err) {
+      console.error('Failed to start recording', err);
+    }
+  };
+
+  const toggleListening = async () => {
+    if (aiState === 'idle') {
+      await startRecording();
+    } else if (aiState === 'listening') {
+      if (recording) {
+        await stopRecordingAndThink(recording);
+      } else {
+        setAiState('thinking');
+      }
+    } else {
+      setAiState('idle');
+    }
+  };
+
+  const toggleMute = async () => {
+    const willMute = !isMicMuted;
+    setIsMicMuted(willMute);
+    if (willMute && aiState === 'listening') {
+      if (recording) {
+        try { await recording.stopAndUnloadAsync(); } catch (e) {}
+        setRecording(null);
+      }
+      if (silenceTimer.current) { clearTimeout(silenceTimer.current); silenceTimer.current = null; }
+      setAiState('idle');
+    } else if (!willMute && aiState === 'idle') {
+      startRecording();
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (silenceTimer.current) clearTimeout(silenceTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -84,305 +301,61 @@ export default function MeerupScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#F8FAFC' }}
+      style={{ flex: 1 }}
       behavior="padding"
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      keyboardVerticalOffset={90}
     >
-      {/* HEADER */}
-      <View style={[styles.header, { paddingTop: insets.top }]}>
-        <View style={styles.headerContent}>
-          <View style={styles.headerLeft}>
-            <Image
-              source={{
-                uri: 'https://lh3.googleusercontent.com/aida/AEtjO1X29_EoHGNbjM2PCS1nghaRaUzjbSMYHhGp8iHMi3tW9cRw729lYKzU-BM7srjPEnFeNYLrYNuHHw7Hgu8k5YpxCqIyDnYDoSLo0Fw0gMAwXt4SvkprbyzGJXmeBD-l15E_OHo3QJB8OEkY0viuYT6q7WiBnjx0TSmCrKBB-lTWJZrh7drZ_7_LTiJX5GeL7m_ZTN0KevrO0MwOHW8QMPkB0BxCTUe_jMhyapdeZww1M7DSw0NXOYAGTq4',
-              }}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-            <View>
-              <Text style={styles.headerTitle}>MEERUP</Text>
-              <View style={styles.locationContainer}>
-                <View style={styles.blueDot} />
-                <Text style={styles.locationText}>Imphal, Manipur</Text>
-              </View>
-            </View>
-          </View>
-          <View style={styles.headerRight}>
-            <Image
-              source={{
-                uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAl3RnvpegqZISRG-SWSoZOBLnK_HoxtkefhzdD0mcmCYiByz6CbcYP16Z-NF6AlhSYKCRw3v2PHSyzy3iQ_X1a5mJLUJTbKSrY-29kB1NDc0PTZeZNQkKv8mz1rDCUQgWsgPhv4ZK_STGs_4PY8lvk12aqSreMrKz5dPgFdY3cKkmS9KPwAyZ5z8VvzObB48B2aJu1-5FnQwAREIGR3xtkx-WxLuy0qJd1oWXDm4NQq1tw2_LNIIWH',
-              }}
-              style={styles.profileAvatar}
-            />
-          </View>
-        </View>
-      </View>
 
+
+      {!isVoiceMode && (
+        <>
       <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-        {/* CONTEXT BADGE */}
-        <View style={styles.badgeContainer}>
-          <View style={styles.badge}>
-            <View style={styles.orangeDot} />
-            <Text style={styles.badgeText}>YOUR MANIPUR COMPANION</Text>
-          </View>
-          <Text style={styles.badgeSubtext}>Active Presence · Imphal Valley Sanctuary</Text>
-        </View>
 
-        {/* AI STATE TABS */}
-        <View style={styles.stateTabs}>
-          {(['listening', 'thinking', 'speaking'] as const).map((state) => (
-            <TouchableOpacity
-              key={state}
-              onPress={() => setAiState(state)}
-              style={[styles.stateTab, aiState === state ? styles.stateTabActive : styles.stateTabInactive]}
-            >
-              <View
-                style={[
-                  styles.stateTabDot,
-                  aiState === state
-                    ? styles.stateTabDotActive
-                    : state === 'listening'
-                    ? { backgroundColor: '#4777c2' }
-                    : state === 'thinking'
-                    ? { backgroundColor: '#9CA3AF' }
-                    : { backgroundColor: '#D97706' },
-                ]}
-              />
-              <Text
-                style={[
-                  styles.stateTabText,
-                  aiState === state ? styles.stateTabTextActive : styles.stateTabTextInactive,
-                ]}
-              >
-                {state.charAt(0).toUpperCase() + state.slice(1)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* CENTRAL ORB */}
-        <View style={styles.orbContainer}>
-          <TouchableOpacity
-            style={[
-              styles.orbOuter,
-              aiState === 'listening' && { borderColor: '#4777c2' },
-              aiState === 'thinking' && { borderColor: '#D97706', transform: [{ scale: 0.95 }] },
-              aiState === 'speaking' && { borderColor: '#047857', backgroundColor: '#FEF3C7', transform: [{ scale: 1.05 }] },
-            ]}
-          >
-            <View style={[styles.orbInner, aiState === 'listening' && { borderColor: '#4777c2' }]}>
-              <MaterialIcons name="arrow-back-ios" size={24} color="#4777c2" style={{ marginLeft: 6 }} />
-              <Text style={styles.orbText}>MEERUP</Text>
-            </View>
-          </TouchableOpacity>
-          <View style={styles.waveformContainer}>
-            {aiState === 'listening' && (
-              <>
-                <AnimatedWaveBar baseHeight={12} color="#4777c2" delay={0} />
-                <AnimatedWaveBar baseHeight={20} color="#4777c2" delay={100} />
-                <AnimatedWaveBar baseHeight={24} color="#275BA5" delay={200} />
-                <AnimatedWaveBar baseHeight={16} color="#4777c2" delay={300} />
-                <AnimatedWaveBar baseHeight={28} color="#6B7280" delay={400} />
-                <AnimatedWaveBar baseHeight={20} color="#4777c2" delay={500} />
-                <AnimatedWaveBar baseHeight={12} color="#4777c2" delay={600} />
-                <AnimatedWaveBar baseHeight={20} color="#275BA5" delay={700} />
-                <AnimatedWaveBar baseHeight={8} color="#6B7280" delay={800} />
-              </>
-            )}
-          </View>
-        </View>
 
         {/* CHAT TRANSCRIPT */}
         <View style={styles.chatContainer}>
-          {/* USER MESSAGE */}
-          <View style={styles.userMessageWrapper}>
-            <View style={styles.userBubble}>
-              <Text style={styles.userMessageText}>I have two hours near Kangla and I love culture.</Text>
-            </View>
-            <View style={styles.messageFooter}>
-              <Text style={styles.timeText}>You · 16:42 PM</Text>
-              <MaterialIcons name="done-all" size={13} color="#047857" style={{ marginLeft: 4 }} />
-            </View>
-          </View>
-
-          {/* AI RESPONSE */}
-          <View style={styles.aiMessageWrapper}>
-            <View style={styles.aiHeader}>
-              <View style={styles.aiAvatar}>
-                <MaterialIcons name="arrow-back-ios" size={10} color="#4777c2" style={{ marginLeft: 2 }} />
-              </View>
-              <Text style={styles.aiName}>MEERUP Companion</Text>
-              <Text style={styles.timeText}>Just now</Text>
-            </View>
-
-            <View style={styles.aiBubble}>
-              <Text style={styles.aiMessageText}>
-                {activeCard === 'kangla' ? (
-                  <>
-                    Start with the sacred <Text style={{ color: '#275BA5', fontWeight: 'bold' }}>Kangla Dragon gate</Text> and Govindaji Temple, then walk 8 minutes toward <Text style={{ color: '#4777c2', fontWeight: 'bold' }}>Ima Keithel</Text> for the living heritage of Asia's largest mother-run market. I've mapped a low-traffic walking route for you.
-                  </>
-                ) : (
-                  <>
-                    Experience the vibrant energy of <Text style={{ color: '#4777c2', fontWeight: 'bold' }}>Ima Keithel</Text>, Asia's largest all-women market. Discover traditional textiles and the living heritage of Manipur, just a short walk from the <Text style={{ color: '#275BA5', fontWeight: 'bold' }}>Kangla Royal Enclosure</Text>.
-                  </>
-                )}
-              </Text>
-
-              {/* CARD 1 */}
-              {activeCard === 'kangla' ? (
-                <View style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <View style={styles.cardImageContainer}>
-                      <Image
-                        source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBkfbqJ9Qq_rORLswzZn7vc7V9fvl5mQGSuqPpdAsQ3P8q9UFOzJML17kKn3gVHAdBxJCtnLlJKtfQG89EA9S1weUmWGUuJnjnQFTpp9NAhyR-NKgza6hqU7xXUGuP2deu5Wf3Kp_l08ix_k5Zz73PGSI5maIZpKmfa5Ik39Chhhxsts8kI8FIx8P5HDKYfhybZ83CDcv4bhAeej_H7lToVkH2prKAo53PBEiNdI-UAGINFmChNlBP5' }}
-                        style={styles.cardImage}
-                      />
-                      <View style={styles.tagOverlay}>
-                        <Text style={styles.tagText}>SACRED</Text>
-                      </View>
-                    </View>
-                    <View style={styles.cardInfo}>
-                      <Text style={styles.cardTitle}>Kangla Royal Enclosure</Text>
-                      <View style={styles.cardStats}>
-                        <MaterialIcons name="near-me" size={14} color="#D97706" />
-                        <Text style={styles.statText}>350m</Text>
-                        <Text style={styles.statDivider}>•</Text>
-                        <MaterialIcons name="schedule" size={14} color="#047857" />
-                        <Text style={styles.statText}>45 min</Text>
-                      </View>
-                      <View style={styles.cardStatus}>
-                        <View style={[styles.statusDot, { backgroundColor: '#047857' }]} />
-                        <Text style={styles.statusText}>Open now · Ceremonial Hours</Text>
-                      </View>
-                    </View>
+          {messages.map((msg, index) => {
+            if (msg.role === 'user') {
+              return (
+                <View key={msg.id} style={styles.userMessageWrapper}>
+                  <View style={styles.userBubble}>
+                    <Text style={styles.userMessageText}>{msg.text}</Text>
                   </View>
-                  <View style={styles.cardActions}>
-                    <TouchableOpacity style={styles.primaryBtn}>
-                      <MaterialIcons name="view-in-ar" size={16} color="white" />
-                      <Text style={styles.primaryBtnText}>Open in AR</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.secondaryBtn}>
-                      <MaterialIcons name="add-location-alt" size={16} color="#D97706" />
-                      <Text style={styles.secondaryBtnText}>Add to Route</Text>
-                    </TouchableOpacity>
+                  <View style={styles.messageFooter}>
+                    <Text style={styles.timeText}>You · {msg.time}</Text>
+                    <MaterialIcons name="done-all" size={13} color="#047857" style={{ marginLeft: 4 }} />
                   </View>
                 </View>
-              ) : (
-                <Pressable style={[styles.card, { flexDirection: 'row', alignItems: 'center' }]} onPress={() => setActiveCard('kangla')}>
-                  <View style={styles.cardImageContainerSmall}>
-                    <Image
-                      source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBkfbqJ9Qq_rORLswzZn7vc7V9fvl5mQGSuqPpdAsQ3P8q9UFOzJML17kKn3gVHAdBxJCtnLlJKtfQG89EA9S1weUmWGUuJnjnQFTpp9NAhyR-NKgza6hqU7xXUGuP2deu5Wf3Kp_l08ix_k5Zz73PGSI5maIZpKmfa5Ik39Chhhxsts8kI8FIx8P5HDKYfhybZ83CDcv4bhAeej_H7lToVkH2prKAo53PBEiNdI-UAGINFmChNlBP5' }}
-                      style={styles.cardImage}
-                    />
-                  </View>
-                  <View style={styles.cardInfoSmall}>
-                    <Text style={styles.cardTitle}>Kangla Royal Enclosure</Text>
-                    <Text style={styles.cardSubtitle}>Sacred Site · 350m away</Text>
-                  </View>
-                  <View style={styles.cardRightSmall}>
-                    <View style={[styles.vibrantTag, { backgroundColor: '#D1FAE5' }]}>
-                      <Text style={[styles.vibrantTagText, { color: '#065F46' }]}>Open now</Text>
+              );
+            } else {
+              return (
+                <View key={msg.id} style={styles.aiMessageWrapper}>
+                  <View style={styles.aiHeader}>
+                    <View style={styles.aiAvatar}>
+                      <MaterialIcons name="arrow-back-ios" size={10} color="#4777c2" style={{ marginLeft: 2 }} />
                     </View>
-                    <Text style={styles.estTimeText}>Est. 45 min</Text>
+                    <Text style={styles.aiName}>MEERUP Companion</Text>
+                    <Text style={styles.timeText}>{msg.time}</Text>
                   </View>
-                </Pressable>
-              )}
-
-              {/* CARD 2 */}
-              {activeCard === 'ima' ? (
-                <View style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <View style={styles.cardImageContainer}>
-                      <Image
-                        source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuA6bbhP82G51C-I2l1e27wDmF0iPgnbrbWPcVnG3eFp7Dv6JesrXmd4PJHtsO0_35ALdcqyE7V3D5AFRocYihcRQmHCGtkxqMK0YNLZr_OSKTvjefuFD0_VTihESVNm-q09fp9astfrxTq9ux-z2cVrz3ZE8z39udUkZI9h3NWrwi5fUXRN0JnXG8r_1QsHJC4xRDchgGLmdJoF77wMwrnGRpJUB2WZsgZ_C1ZxYzGAo16Q78ztTBm8' }}
-                        style={styles.cardImage}
-                      />
-                      <View style={styles.tagOverlay}>
-                        <Text style={styles.tagText}>HERITAGE</Text>
-                      </View>
-                    </View>
-                    <View style={styles.cardInfo}>
-                      <Text style={styles.cardTitle}>Ima Keithel Market</Text>
-                      <View style={styles.cardStats}>
-                        <MaterialIcons name="near-me" size={14} color="#D97706" />
-                        <Text style={styles.statText}>1.1km</Text>
-                        <Text style={styles.statDivider}>•</Text>
-                        <MaterialIcons name="schedule" size={14} color="#047857" />
-                        <Text style={styles.statText}>50 min</Text>
-                      </View>
-                      <View style={styles.cardStatus}>
-                        <View style={[styles.statusDot, { backgroundColor: '#D97706' }]} />
-                        <Text style={[styles.statusText, { color: '#D97706' }]}>Vibrant now · Full Market</Text>
-                      </View>
-                    </View>
-                  </View>
-                  <View style={styles.cardActions}>
-                    <TouchableOpacity style={styles.primaryBtn}>
-                      <MaterialIcons name="view-in-ar" size={16} color="white" />
-                      <Text style={styles.primaryBtnText}>Open in AR</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.secondaryBtn}>
-                      <MaterialIcons name="add-location-alt" size={16} color="#D97706" />
-                      <Text style={styles.secondaryBtnText}>Add to Route</Text>
-                    </TouchableOpacity>
+      
+                  <View style={styles.aiBubble}>
+                    <Text style={styles.aiMessageText}>
+                      {msg.text}
+                    </Text>
+                    
                   </View>
                 </View>
-              ) : (
-                <Pressable style={[styles.card, { flexDirection: 'row', alignItems: 'center' }]} onPress={() => setActiveCard('ima')}>
-                  <View style={styles.cardImageContainerSmall}>
-                    <Image
-                      source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuA6bbhP82G51C-I2l1e27wDmF0iPgnbrbWPcVnG3eFp7Dv6JesrXmd4PJHtsO0_35ALdcqyE7V3D5AFRocYihcRQmHCGtkxqMK0YNLZr_OSKTvjefuFD0_VTihESVNm-q09fp9astfrxTq9ux-z2cVrz3ZE8z39udUkZI9h3NWrwi5fUXRN0JnXG8r_1QsHJC4xRDchgGLmdJoF77wMwrnGRpJUB2WZsgZ_C1ZxYzGAo16Q78ztTBm8' }}
-                      style={styles.cardImage}
-                    />
-                  </View>
-                  <View style={styles.cardInfoSmall}>
-                    <Text style={styles.cardTitle}>Ima Keithel Market</Text>
-                    <Text style={styles.cardSubtitle}>Living Heritage · 1.1 km away</Text>
-                  </View>
-                  <View style={styles.cardRightSmall}>
-                    <View style={styles.vibrantTag}>
-                      <Text style={styles.vibrantTagText}>Vibrant now</Text>
-                    </View>
-                    <Text style={styles.estTimeText}>Est. 50 min</Text>
-                  </View>
-                </Pressable>
-              )}
-            </View>
-          </View>
+              );
+            }
+          })}
         </View>
 
-        {/* SUGGESTIONS */}
-        <View style={styles.suggestionsContainer}>
-          <Text style={styles.suggestionsTitle}>SUGGESTED CULTURAL INQUIRIES</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionsScroll}>
-            <TouchableOpacity style={styles.suggestionChip}>
-              <MaterialIcons name="menu-book" size={16} color="#D97706" />
-              <Text style={styles.suggestionChipText}>Tell me the legend of Kangla Sha</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.suggestionChip}>
-              <MaterialIcons name="restaurant" size={16} color="#047857" />
-              <Text style={styles.suggestionChipText}>Find authentic Chak-hao nearby</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.suggestionChip}>
-              <MaterialIcons name="translate" size={16} color="#047857" />
-              <Text style={styles.suggestionChipText}>Translate local phrase to Meiteilon</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
+        
       </ScrollView>
 
       {/* BOTTOM INPUT */}
       <View style={[styles.bottomInputContainer, { paddingBottom: isKeyboardVisible ? 4 : Math.max(insets.bottom, 10) }]}>
-        <View style={styles.bottomHeader}>
-          <View style={styles.langSelector}>
-            <MaterialIcons name="language" size={14} color="#D97706" />
-            <Text style={styles.langText}>EN | Manipuri | Hindi</Text>
-          </View>
-          <View style={styles.engineIndicator}>
-            <View style={styles.blueDot} />
-            <Text style={styles.engineText}>Neural Voice Engine</Text>
-          </View>
-        </View>
+
 
         <View style={styles.inputRow}>
           <TouchableOpacity style={styles.iconBtn}>
@@ -395,24 +368,117 @@ export default function MeerupScreen() {
               placeholderTextColor="#9CA3AF"
               value={inputText}
               onChangeText={setInputText}
+              onFocus={() => setIsInputFocused(true)}
+              onBlur={() => setIsInputFocused(false)}
             />
           </View>
-          <TouchableOpacity style={styles.micBtn}>
-            <MaterialIcons name="mic" size={22} color="white" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.sendBtn}>
-            <MaterialIcons name="arrow-upward" size={20} color="#047857" />
-          </TouchableOpacity>
+
+          {inputText.trim().length > 0 ? (
+            <TouchableOpacity style={styles.sendBtn} onPress={handleSendText}>
+              <MaterialIcons name="arrow-upward" size={20} color="#047857" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.sendBtn} onPress={() => {
+              setIsMicMuted(false);
+              setIsVoiceMode(true);
+            }}>
+              <MaterialIcons name="mic" size={20} color="#4B5563" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
+        </>
+      )}
+
+      {isVoiceMode && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000', zIndex: 999, justifyContent: 'space-between' }]}>
+          {/* Header */}
+          <View style={{ height: Math.max(insets.top, 20) + 10 }} />
+
+
+          {/* Center Content */}
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={styles.orbContainer}>
+          <AnimatedPulseRing size={112} color="#4777c2" delay={0} active={aiState === 'listening'} />
+          <AnimatedPulseRing size={112} color="#4777c2" delay={600} active={aiState === 'listening'} />
+          <AnimatedPulseRing size={112} color="#4777c2" delay={1200} active={aiState === 'listening'} />
+          <TouchableOpacity
+            onPress={toggleListening}
+            style={[
+              styles.orbOuter,
+              aiState === 'idle' && { borderColor: '#E5E7EB', opacity: 0.5 },
+              aiState === 'listening' && { borderColor: '#4777c2' },
+              aiState === 'thinking' && { borderColor: '#D97706' },
+              aiState === 'speaking' && { borderColor: '#047857' },
+            ]}
+          >
+            <View style={[
+              styles.orbInner,
+              aiState === 'idle' && { borderColor: '#E5E7EB' },
+              aiState === 'listening' && { borderColor: '#4777c2' },
+              aiState === 'thinking' && { borderColor: '#D97706' },
+              aiState === 'speaking' && { borderColor: '#047857' },
+            ]}>
+              <MaterialIcons 
+                name="mic" 
+                size={24} 
+                color={
+                  aiState === 'listening' ? '#4777c2' : 
+                  aiState === 'thinking' ? '#D97706' : 
+                  aiState === 'speaking' ? '#047857' : 
+                  '#9CA3AF'
+                } 
+                style={{ marginBottom: 2 }}
+              />
+              <Text style={[
+                styles.orbText,
+                aiState === 'idle' && { color: '#9CA3AF' },
+                aiState === 'listening' && { color: '#4777c2' },
+                aiState === 'thinking' && { color: '#D97706' },
+                aiState === 'speaking' && { color: '#047857' },
+              ]}>
+                {aiState === 'idle' ? 'MEERUP' : aiState.charAt(0).toUpperCase() + aiState.slice(1)}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+          </View>
+
+          {/* Footer */}
+          <View style={[styles.bottomInputContainer, { paddingBottom: Math.max(insets.bottom, 10), backgroundColor: 'transparent' }]}>
+            <View style={[styles.inputRow, { justifyContent: 'space-between' }]}>
+              {/* Left: Mic Disable */}
+              <TouchableOpacity style={[styles.sendBtn, { backgroundColor: '#1F2937', borderColor: '#374151' }]} onPress={toggleMute}>
+                <MaterialIcons name={!isMicMuted ? "mic" : "mic-off"} size={20} color={!isMicMuted ? "#9CA3AF" : "#EF4444"} />
+              </TouchableOpacity>
+
+              {/* Center: Language Toggle */}
+              <TouchableOpacity 
+                style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#1F2937', borderRadius: 24, borderWidth: 1, borderColor: '#4B5563', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 1.5 }}
+                onPress={toggleLanguagePair}
+              >
+                <Text style={{ color: '#E5E7EB', fontSize: 13, fontWeight: '600' }}>{languagePair.split(' ↔ ')[0]}</Text>
+                <MaterialIcons name="swap-horiz" size={18} color="#9CA3AF" style={{ marginHorizontal: 6 }} />
+                <Text style={{ color: '#E5E7EB', fontSize: 13, fontWeight: '600' }}>{languagePair.split(' ↔ ')[1]}</Text>
+              </TouchableOpacity>
+
+              {/* Right: Keyboard/Close */}
+              <TouchableOpacity style={[styles.sendBtn, { backgroundColor: '#1F2937', borderColor: '#374151' }]} onPress={() => setIsVoiceMode(false)}>
+                <MaterialIcons name="keyboard" size={20} color="#9CA3AF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
   // HEADER
   header: {
-    backgroundColor: 'white',
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
     zIndex: 50,
@@ -436,7 +502,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#111827',
+    color: colors.text,
     letterSpacing: 0.5,
   },
   locationContainer: {
@@ -453,7 +519,7 @@ const styles = StyleSheet.create({
   },
   locationText: {
     fontSize: 11,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   headerRight: {
@@ -465,7 +531,7 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
   },
 
   // LAYOUT
@@ -490,10 +556,10 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 4,
-    backgroundColor: 'white',
+    backgroundColor: colors.backgroundElement,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
   },
   orangeDot: {
     width: 8,
@@ -509,52 +575,9 @@ const styles = StyleSheet.create({
   },
   badgeSubtext: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     marginTop: 6,
     fontWeight: '500',
-  },
-
-  // STATE TABS
-  stateTabs: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 24,
-  },
-  stateTab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  stateTabActive: {
-    backgroundColor: '#4777c2',
-    borderColor: '#4777c2',
-  },
-  stateTabInactive: {
-    backgroundColor: 'white',
-    borderColor: '#E5E7EB',
-  },
-  stateTabDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  stateTabDotActive: {
-    backgroundColor: 'white',
-  },
-  stateTabText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  stateTabTextActive: {
-    color: 'white',
-  },
-  stateTabTextInactive: {
-    color: '#4B5563',
   },
 
   // ORB
@@ -570,7 +593,7 @@ const styles = StyleSheet.create({
     borderRadius: 56,
     borderWidth: 4,
     padding: 6,
-    backgroundColor: 'white',
+    backgroundColor: colors.backgroundElement,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 2,
@@ -583,31 +606,17 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 50,
     borderWidth: 2,
-    backgroundColor: 'white',
+    backgroundColor: colors.backgroundElement,
     alignItems: 'center',
     justifyContent: 'center',
   },
   orbText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: 'bold',
-    color: '#4777c2',
     marginTop: 2,
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
-  waveformContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    gap: 6,
-    height: 28,
-    marginTop: 16,
-    width: 200,
-  },
-  waveBar: {
-    width: 4,
-    borderRadius: 2,
-  },
-
+  
   // CHAT
   chatContainer: {
     flexDirection: 'column',
@@ -621,15 +630,15 @@ const styles = StyleSheet.create({
   userBubble: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#EEF2F6',
+    backgroundColor: isDark ? colors.backgroundSelected : '#EEF2F6',
     borderRadius: 16,
     borderTopRightRadius: 4,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.border,
   },
   userMessageText: {
     fontSize: 14,
-    color: '#111827',
+    color: colors.text,
     fontWeight: '500',
   },
   messageFooter: {
@@ -641,7 +650,7 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 10,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   aiMessageWrapper: {
     alignSelf: 'flex-start',
@@ -660,7 +669,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#4777c2',
-    backgroundColor: 'white',
+    backgroundColor: colors.backgroundElement,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -671,11 +680,11 @@ const styles = StyleSheet.create({
   },
   aiBubble: {
     padding: 16,
-    backgroundColor: 'white',
+    backgroundColor: colors.backgroundElement,
     borderRadius: 16,
     borderTopLeftRadius: 4,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     elevation: 1,
     shadowColor: '#000',
     shadowOpacity: 0.05,
@@ -685,16 +694,16 @@ const styles = StyleSheet.create({
   aiMessageText: {
     fontSize: 14,
     lineHeight: 22,
-    color: '#1F2937',
+    color: colors.text,
   },
 
   // CARDS
   card: {
     padding: 12,
-    backgroundColor: 'white',
+    backgroundColor: colors.backgroundElement,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     gap: 12,
     marginBottom: 8,
   },
@@ -707,18 +716,18 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 8,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: isDark ? colors.backgroundSelected : '#F3F4F6',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     overflow: 'hidden',
   },
   cardImageContainerSmall: {
     width: 48,
     height: 48,
     borderRadius: 8,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: isDark ? colors.backgroundSelected : '#F3F4F6',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     overflow: 'hidden',
     marginRight: 12,
   },
@@ -730,7 +739,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 4,
     left: 4,
-    backgroundColor: 'white',
+    backgroundColor: colors.backgroundElement,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 8,
@@ -753,11 +762,11 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#111827',
+    color: colors.text,
   },
   cardSubtitle: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     marginTop: 2,
   },
   cardStats: {
@@ -768,7 +777,7 @@ const styles = StyleSheet.create({
   },
   statText: {
     fontSize: 12,
-    color: '#4B5563',
+    color: colors.textSecondary,
   },
   statDivider: {
     color: '#D1D5DB',
@@ -819,13 +828,13 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: 'white',
+    backgroundColor: colors.backgroundElement,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 16,
   },
   secondaryBtnText: {
-    color: '#111827',
+    color: colors.text,
     fontSize: 12,
     fontWeight: '600',
   },
@@ -842,7 +851,7 @@ const styles = StyleSheet.create({
   },
   estTimeText: {
     fontSize: 11,
-    color: '#6B7280',
+    color: colors.textSecondary,
     marginTop: 4,
   },
 
@@ -853,7 +862,7 @@ const styles = StyleSheet.create({
   suggestionsTitle: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#6B7280',
+    color: colors.textSecondary,
     letterSpacing: 1,
     marginBottom: 8,
     paddingLeft: 4,
@@ -868,9 +877,9 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    backgroundColor: 'white',
+    backgroundColor: colors.backgroundElement,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 20,
     elevation: 1,
     shadowColor: '#000',
@@ -880,16 +889,13 @@ const styles = StyleSheet.create({
   suggestionChipText: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#1F2937',
+    color: colors.text,
   },
 
   // BOTTOM INPUT
   bottomInputContainer: {
     paddingHorizontal: 16,
     paddingTop: 10,
-    backgroundColor: 'white',
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
   },
   bottomHeader: {
     flexDirection: 'row',
@@ -905,7 +911,7 @@ const styles = StyleSheet.create({
   },
   langText: {
     fontSize: 12,
-    color: '#4B5563',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   engineIndicator: {
@@ -915,7 +921,7 @@ const styles = StyleSheet.create({
   },
   engineText: {
     fontSize: 11,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '500',
   },
   inputRow: {
@@ -927,9 +933,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: isDark ? colors.backgroundSelected : '#F3F4F6',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -937,16 +943,16 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 40,
     paddingHorizontal: 14,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.background,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 20,
     justifyContent: 'center',
   },
   textInput: {
     flex: 1,
     fontSize: 12,
-    color: '#111827',
+    color: colors.text,
   },
   micBtn: {
     width: 40,
@@ -960,9 +966,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: isDark ? colors.backgroundSelected : '#F3F4F6',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },

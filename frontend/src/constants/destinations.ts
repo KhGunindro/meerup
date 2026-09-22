@@ -217,8 +217,8 @@ export const DESTINATIONS: Destination[] = [
     etiquette:
       "Bargaining is acceptable but do so respectfully -- these are livelihoods, not sport. Ask before photographing vendors. Do not touch merchandise without indicating intent to buy. Modest dress is appreciated. The market closes on festival days; check local calendars. Support by buying genuine handloom rather than synthetic imitations.",
     mapLabel: 'Ima Keithel Map',
-    lat: 24.8067,
-    lng: 93.9385,
+    lat: 24.8074,
+    lng: 93.9358,
     audioGuide: {
       title: 'Echoes of the Mothers: 500 Years of Nupi Power',
       narrator: 'Ima Memcha Devi · Textile Artisan & Market Elder',
@@ -421,8 +421,8 @@ export const DESTINATIONS: Destination[] = [
     etiquette:
       "Many traditional restaurants do not serve alcohol -- respect this policy. Try food with your right hand as is local custom. Ask about spice levels before ordering -- Singju can be intensely hot. Support women-led eateries in the Ima Keithel area. Avoid wasting food -- portions are generous.",
     mapLabel: 'Food Quarter Map',
-    lat: 24.8067,
-    lng: 93.9385,
+    lat: 24.8074,
+    lng: 93.9358,
     audioGuide: {
       title: 'Food as Medicine: The Chak-hao & Singju Tradition',
       narrator: 'Chef Tomba Meitei · Indigenous Gastronomy Archivist',

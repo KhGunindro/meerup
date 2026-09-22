@@ -15,6 +15,7 @@ import {
   Keyboard,
   Dimensions,
   StatusBar,
+  Linking,
   useColorScheme,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -22,18 +23,52 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { speechToSpeech, transcribeAudio } from '@/utils/meerupApi';
+import * as Location from 'expo-location';
+import { DESTINATIONS } from '@/constants/destinations';
+import { openTurnByTurnNavigation, getDistanceKm } from '@/utils/navigation';
+
 
 // ─── Live LLM config (Qwen3 via ngrok) ────────────────────────────────────────
 const LLM_BASE_URL = 'https://ed24-2405-201-ac01-5153-71fa-7687-e166-fa4c.ngrok-free.app/v1';
 const LLM_MODEL = 'lmstudio-community/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M';
-const SYSTEM_PROMPT = `You are MEERUP, a warm and knowledgeable AI travel companion for Manipur, India. 
-Help tourists discover authentic cultural experiences, heritage sites, local food, festivals, and hidden gems. 
-Be concise — respond in 2-4 sentences unless a longer answer is clearly needed. 
-Respond in plain conversational text without markdown formatting.`;
 
-async function askLLM(history: Array<{ role: string; content: string }>, userText: string): Promise<string> {
+interface UserContext {
+  interests: string[];
+  latitude: number | null;
+  longitude: number | null;
+  available_minutes: number | null;
+}
+
+function buildSystemPrompt(ctx: UserContext): string {
+  let prompt = `You are MEERUP, a warm and knowledgeable AI travel companion for Manipur, India.
+Help tourists discover authentic cultural experiences, heritage sites, local food, festivals, and hidden gems.
+Be concise — respond in 2-4 sentences unless a longer answer is clearly needed.
+Respond in plain conversational text without markdown formatting.
+When suggesting or recommending attractions or places, always explicitly mention their standard names (such as Kangla Fort, Loktak Lake, Keibul Lamjao, Ima Keithel, Govindaji Temple, Sendra, Andro Heritage Village) so travelers can navigate to them directly.`;
+
+  if (ctx.latitude && ctx.longitude) {
+    prompt += `\n\nUser's current location: latitude ${ctx.latitude.toFixed(4)}, longitude ${ctx.longitude.toFixed(4)} (Manipur region).`;
+  }
+  if (ctx.interests.length > 0) {
+    prompt += `\nUser's interests: ${ctx.interests.join(', ')}.`;
+  }
+  if (ctx.available_minutes) {
+    const hrs = ctx.available_minutes >= 60
+      ? `${(ctx.available_minutes / 60).toFixed(1)} hours`
+      : `${ctx.available_minutes} minutes`;
+    prompt += `\nUser has approximately ${hrs} available.`;
+  }
+  prompt += `\nTailor all recommendations to these preferences when relevant.`;
+  return prompt;
+}
+
+async function askLLM(
+  history: Array<{ role: string; content: string }>,
+  userText: string,
+  ctx: UserContext,
+): Promise<string> {
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: buildSystemPrompt(ctx) },
     ...history,
     { role: 'user', content: userText },
   ];
@@ -57,6 +92,115 @@ async function askLLM(history: Array<{ role: string; content: string }>, userTex
   return data.choices?.[0]?.message?.content?.trim() ?? "I'm sorry, I couldn't process that.";
 }
 // ───────────────────────────────────────────────────────────────────────────────
+
+// ─── Place mention parser & Google Maps navigation ────────────────────────────
+interface PlaceMention {
+  name: string;
+  lat: number;
+  lng: number;
+}
+
+interface PlaceCandidate {
+  name: string;
+  lat: number;
+  lng: number;
+  patterns: RegExp[];
+}
+
+const PLACE_REGISTRY: PlaceCandidate[] = [
+  {
+    name: 'Kangla Fort',
+    lat: 24.8080,
+    lng: 93.9400,
+    patterns: [/\bkangla(\s+fort)?\b/i],
+  },
+  {
+    name: 'Loktak Lake',
+    lat: 24.5320,
+    lng: 93.7810,
+    patterns: [/\bloktak(\s+lake)?\b/i, /\bsendra\b/i],
+  },
+  {
+    name: 'Keibul Lamjao National Park',
+    lat: 24.5020,
+    lng: 93.7660,
+    patterns: [/\bkeibul(\s+lamjao)?\b/i],
+  },
+  {
+    name: 'Ima Keithel',
+    lat: 24.8074,
+    lng: 93.9358,
+    patterns: [/\bima\s+(keithel|market)\b/i, /\bmother'?s\s+market\b/i, /\bkhwairamband\b/i],
+  },
+  {
+    name: 'Govindaji Temple',
+    lat: 24.7978,
+    lng: 93.9485,
+    patterns: [/\bgovinda?jee?(\s+temple)?\b/i],
+  },
+  {
+    name: 'Sangai Festival',
+    lat: 24.7960,
+    lng: 93.9490,
+    patterns: [/\bsangai\s+festival\b/i],
+  },
+  {
+    name: 'INA Memorial, Moirang',
+    lat: 24.5020,
+    lng: 93.7660,
+    patterns: [/\bina\s+memorial\b/i, /\bmoirang\b/i],
+  },
+  {
+    name: 'Andro Heritage Village',
+    lat: 24.7500,
+    lng: 94.0667,
+    patterns: [/\bandro(\s+village|\s+heritage)?\b/i],
+  },
+  {
+    name: 'Dzukou Valley',
+    lat: 25.5667,
+    lng: 94.0667,
+    patterns: [/\bdz[uu]ko[uu](\s+valley)?\b/i],
+  },
+  {
+    name: 'Shirui Kashong Peak',
+    lat: 25.1167,
+    lng: 94.4333,
+    patterns: [/\bshirui(\s+kashong|\s+peak|\s+lily)?\b/i, /\bukhrul\b/i],
+  },
+];
+
+function parsePlaceMentions(text: string): PlaceMention[] {
+  const found: PlaceMention[] = [];
+  const seen = new Set<string>();
+
+  for (const place of PLACE_REGISTRY) {
+    if (place.patterns.some(p => p.test(text))) {
+      if (!seen.has(place.name)) {
+        seen.add(place.name);
+        found.push({ name: place.name, lat: place.lat, lng: place.lng });
+      }
+    }
+  }
+
+  // Fallback check against any other destinations defined in DESTINATIONS
+  for (const dest of DESTINATIONS) {
+    if (!seen.has(dest.name)) {
+      const regex = new RegExp(`\\b${dest.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (regex.test(text)) {
+        seen.add(dest.name);
+        found.push({ name: dest.name, lat: dest.lat, lng: dest.lng });
+      }
+    }
+  }
+
+  return found;
+}
+
+function openInMaps(lat: number, lng: number, label: string) {
+  openTurnByTurnNavigation(lat, lng, label);
+}
+// ──────────────────────────────────────────────────────────────────────────────
 
 let AudioRuntime: typeof Audio | any;
 try {
@@ -129,6 +273,7 @@ interface ChatMessage {
   role: 'user' | 'ai';
   text: string;
   time: string;
+  places?: PlaceMention[];
 }
 
 // LLM conversation history (separate from display messages — uses OpenAI roles)
@@ -146,13 +291,90 @@ export default function MeerupScreen() {
   const [inputText, setInputText] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [llmHistory, setLlmHistory] = useState<LLMHistory>([]); // persists context across turns
-  const [activeCard, setActiveCard] = useState<'kangla' | 'ima'>('kangla');
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [languagePair, setLanguagePair] = useState<'Manipuri ↔ English' | 'Hindi ↔ Manipuri'>('Manipuri ↔ English');
   const [isMicMuted, setIsMicMuted] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+
+  // ─── Onboarding / user context ───────────────────────────────────────
+  const [showOnboarding, setShowOnboarding] = useState(true);
+  const [userContext, setUserContext] = useState<UserContext>({
+    interests: [],
+    latitude: null,
+    longitude: null,
+    available_minutes: null,
+  });
+  const [locationLabel, setLocationLabel] = useState<string | null>(null);
+  const [locLoading, setLocLoading] = useState(false);
+
+  const INTEREST_OPTIONS = [
+    { label: 'Culture', icon: 'museum' },
+    { label: 'Food', icon: 'restaurant' },
+    { label: 'Nature', icon: 'park' },
+    { label: 'History', icon: 'account-balance' },
+    { label: 'Photography', icon: 'photo-camera' },
+    { label: 'Festivals', icon: 'celebration' },
+    { label: 'Shopping', icon: 'shopping-bag' },
+    { label: 'Adventure', icon: 'terrain' },
+  ];
+
+  const TIME_OPTIONS = [
+    { label: '30 min', value: 30 },
+    { label: '1 hr', value: 60 },
+    { label: '2 hrs', value: 120 },
+    { label: '3 hrs', value: 180 },
+    { label: 'Half day', value: 270 },
+  ];
+
+  const toggleInterest = (label: string) => {
+    setUserContext(prev => ({
+      ...prev,
+      interests: prev.interests.includes(label)
+        ? prev.interests.filter(i => i !== label)
+        : [...prev.interests, label],
+    }));
+  };
+
+  const requestLocation = async () => {
+    setLocLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setUserContext(prev => ({
+          ...prev,
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+        }));
+        // Reverse geocode for display label
+        const geo = await Location.reverseGeocodeAsync(loc.coords);
+        if (geo[0]) {
+          setLocationLabel(`${geo[0].district || geo[0].city || 'Your location'}, Manipur`);
+        } else {
+          setLocationLabel('Location detected');
+        }
+      } else {
+        setLocationLabel('Permission denied');
+      }
+    } catch {
+      setLocationLabel('Could not get location');
+    }
+    setLocLoading(false);
+  };
+
+  const finishOnboarding = () => setShowOnboarding(false);
+
+  const handleNewChat = () => {
+    setMessages([]);
+    setLlmHistory([]);
+    setInputText('');
+    setAiState('idle');
+    setShowOnboarding(true);
+  };
+  // ──────────────────────────────────────────────────────────────────
+
 
   useEffect(() => {
     if (isVoiceMode && aiState === 'idle' && !isMicMuted) {
@@ -175,7 +397,7 @@ export default function MeerupScreen() {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
-      const reply = await askLLM(llmHistory, text);
+      const reply = await askLLM(llmHistory, text, userContext);
 
       // Update LLM history for multi-turn context
       setLlmHistory(prev => [
@@ -185,7 +407,8 @@ export default function MeerupScreen() {
       ]);
 
       setAiState('speaking');
-      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'ai', text: reply, time: now };
+      const places = parsePlaceMentions(reply);
+      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'ai', text: reply, time: now, places };
       setMessages(prev => [...prev, aiMsg]);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     } catch (err: any) {
@@ -237,7 +460,8 @@ export default function MeerupScreen() {
       
       if (response.text) {
         const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: '(Voice message sent)', time: 'Just now' };
-        const aiMsg: ChatMessage = { id: (Date.now()+1).toString(), role: 'ai', text: response.text, time: 'Just now' };
+        const places = parsePlaceMentions(response.text);
+        const aiMsg: ChatMessage = { id: (Date.now()+1).toString(), role: 'ai', text: response.text, time: 'Just now', places };
         setMessages(prev => [...prev, userMsg, aiMsg]);
       }
       
@@ -357,10 +581,123 @@ export default function MeerupScreen() {
       keyboardVerticalOffset={90}
     >
 
+      {/* ─── ONBOARDING OVERLAY ─────────────────────────────────────── */}
+      {showOnboarding && (
+        <View style={[StyleSheet.absoluteFill, styles.onboardingOverlay]}>
+          <ScrollView
+            contentContainerStyle={styles.onboardingScroll}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* Skip */}
+            <TouchableOpacity style={styles.skipBtn} onPress={finishOnboarding}>
+              <Text style={styles.skipText}>Skip</Text>
+              <MaterialIcons name="arrow-forward" size={14} color="#9CA3AF" />
+            </TouchableOpacity>
+
+            <Text style={styles.onboardingTitle}>Personalise your{'\n'}MEERUP experience</Text>
+            <Text style={styles.onboardingSubtitle}>
+              Answer a few quick questions so I can give you the best recommendations.
+            </Text>
+
+            {/* Interests */}
+            <Text style={styles.onboardingSectionLabel}>What are you into?</Text>
+            <View style={styles.interestGrid}>
+              {INTEREST_OPTIONS.map((opt) => {
+                const selected = userContext.interests.includes(opt.label);
+                return (
+                  <TouchableOpacity
+                    key={opt.label}
+                    onPress={() => toggleInterest(opt.label)}
+                    style={[styles.interestChip, selected && styles.interestChipSelected]}
+                  >
+                    <MaterialIcons
+                      name={opt.icon as any}
+                      size={18}
+                      color={selected ? '#fff' : '#4777c2'}
+                    />
+                    <Text style={[styles.interestChipText, selected && styles.interestChipTextSelected]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Location */}
+            <Text style={styles.onboardingSectionLabel}>Your location</Text>
+            <TouchableOpacity
+              style={[styles.locationBtn, userContext.latitude !== null && styles.locationBtnActive]}
+              onPress={requestLocation}
+              disabled={locLoading}
+            >
+              <MaterialIcons
+                name={userContext.latitude !== null ? 'location-on' : 'my-location'}
+                size={20}
+                color={userContext.latitude !== null ? '#fff' : '#4777c2'}
+              />
+              <Text style={[styles.locationBtnText, userContext.latitude !== null && styles.locationBtnTextActive]}>
+                {locLoading ? 'Detecting…' : locationLabel ?? 'Use My Location'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Available time */}
+            <Text style={styles.onboardingSectionLabel}>How much time do you have?</Text>
+            <View style={styles.timeRow}>
+              {TIME_OPTIONS.map((opt) => {
+                const selected = userContext.available_minutes === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    onPress={() => setUserContext(prev => ({ ...prev, available_minutes: opt.value }))}
+                    style={[styles.timeChip, selected && styles.timeChipSelected]}
+                  >
+                    <Text style={[styles.timeChipText, selected && styles.timeChipTextSelected]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* CTA */}
+            <TouchableOpacity style={styles.startBtn} onPress={finishOnboarding}>
+              <Text style={styles.startBtnText}>Start Exploring</Text>
+              <MaterialIcons name="arrow-forward" size={18} color="#fff" />
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      )}
+      {/* ──────────────────────────────────────────────────────────────── */}
 
       {!isVoiceMode && (
         <>
-      <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.contentContainer}>
+          {/* Subheader with Active Status & New Chat Button */}
+          <View style={styles.chatTopBar}>
+            <View style={styles.chatTopBarLeft}>
+              <View style={styles.onlineDot} />
+              <Text style={styles.chatTopBarTitle}>MEERUP Assistant</Text>
+              {userContext.interests.length > 0 && (
+                <View style={styles.contextBadge}>
+                  <Text style={styles.contextBadgeText} numberOfLines={1}>
+                    {userContext.interests.slice(0, 2).join(', ')}{userContext.interests.length > 2 ? ` +${userContext.interests.length - 2}` : ''}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={styles.newChatBtn}
+              onPress={handleNewChat}
+              accessibilityLabel="Start new chat"
+              accessibilityRole="button"
+            >
+              <MaterialIcons name="add-comment" size={15} color="#4777c2" />
+              <Text style={styles.newChatText}>New Chat</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.contentContainer}>
 
 
         {/* CHAT TRANSCRIPT */}
@@ -412,6 +749,50 @@ export default function MeerupScreen() {
       
                   <View style={styles.aiBubble}>
                     <Text style={styles.aiMessageText}>{msg.text}</Text>
+
+                    {/* ── Clickable place chips with turn-by-turn directions ── */}
+                    {msg.places && msg.places.length > 0 && (
+                      <View style={styles.placesRow}>
+                        <View style={styles.placesHeaderRow}>
+                          <MaterialIcons name="navigation" size={13} color="#047857" />
+                          <Text style={styles.placesLabel}>
+                            {userContext.latitude !== null && userContext.longitude !== null
+                              ? 'Directions from your location'
+                              : 'Get Directions'}
+                          </Text>
+                        </View>
+                        {msg.places.map(p => {
+                          const hasLoc = userContext.latitude !== null && userContext.longitude !== null;
+                          const distKm = hasLoc
+                            ? getDistanceKm(userContext.latitude!, userContext.longitude!, p.lat, p.lng)
+                            : null;
+                          const distLabel = distKm !== null
+                            ? distKm < 1
+                              ? `${Math.round(distKm * 1000)} m`
+                              : `${distKm.toFixed(1)} km`
+                            : null;
+
+                          return (
+                            <TouchableOpacity
+                              key={p.name}
+                              style={styles.placeChip}
+                              onPress={() => openTurnByTurnNavigation(p.lat, p.lng, p.name)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Get directions to ${p.name}`}
+                            >
+                              <MaterialIcons name="directions" size={14} color="#fff" />
+                              <Text style={styles.placeChipText}>{p.name}</Text>
+                              {distLabel && (
+                                <View style={styles.distanceBadge}>
+                                  <Text style={styles.distanceBadgeText}>{distLabel}</Text>
+                                </View>
+                              )}
+                              <MaterialIcons name="arrow-forward" size={12} color="rgba(255,255,255,0.8)" />
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    )}
                   </View>
                 </View>
               );
@@ -460,7 +841,7 @@ export default function MeerupScreen() {
           </View>
 
           {inputText.trim().length > 0 ? (
-            <TouchableOpacity style={styles.sendBtn} onPress={handleSendText}>
+            <TouchableOpacity style={styles.sendBtn} onPress={() => handleSendText()}>
               <MaterialIcons name="arrow-upward" size={20} color="#047857" />
             </TouchableOpacity>
           ) : (
@@ -704,6 +1085,61 @@ const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
   },
   
   // CHAT
+  chatTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: isDark ? colors.backgroundElement : '#F8FAFC',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  chatTopBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  onlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10B981',
+  },
+  chatTopBarTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text,
+    letterSpacing: 0.2,
+  },
+  contextBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    backgroundColor: isDark ? '#1E293B' : '#E0E7FF',
+    maxWidth: 140,
+  },
+  contextBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#4777c2',
+  },
+  newChatBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: isDark ? colors.backgroundSelected : '#EEF2F6',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  newChatText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4777c2',
+  },
   chatContainer: {
     flexDirection: 'column',
     gap: 16,
@@ -781,6 +1217,60 @@ const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     color: colors.text,
+  },
+  placesRow: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  placesHeaderRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 4,
+  },
+  placesLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#047857',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  placeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#047857',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  placeChipText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  distanceBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  distanceBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
   },
 
   // CARDS
@@ -941,43 +1431,6 @@ const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
     marginTop: 4,
   },
 
-  // SUGGESTIONS
-  suggestionsContainer: {
-    marginBottom: 24,
-  },
-  suggestionsTitle: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: colors.textSecondary,
-    letterSpacing: 1,
-    marginBottom: 8,
-    paddingLeft: 4,
-  },
-  suggestionsScroll: {
-    paddingRight: 16,
-    gap: 8,
-  },
-  suggestionChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: colors.backgroundElement,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 20,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-  },
-  suggestionChipText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: colors.text,
-  },
-
   // BOTTOM INPUT
   bottomInputContainer: {
     paddingHorizontal: 16,
@@ -1079,5 +1532,149 @@ const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
     fontWeight: '500',
     color: colors.text,
     flexShrink: 1,
+  },
+
+  // ONBOARDING
+  onboardingOverlay: {
+    backgroundColor: isDark ? '#0A0F1E' : '#F0F4FF',
+    zIndex: 999,
+  },
+  onboardingScroll: {
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    paddingBottom: 40,
+  },
+  skipBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 4,
+    marginBottom: 32,
+  },
+  skipText: {
+    fontSize: 13,
+    color: '#9CA3AF',
+    fontWeight: '500',
+  },
+  onboardingTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: colors.text,
+    lineHeight: 36,
+    marginBottom: 10,
+  },
+  onboardingSubtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    lineHeight: 22,
+    marginBottom: 32,
+  },
+  onboardingSectionLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4777c2',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+    marginTop: 8,
+  },
+  interestGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 28,
+  },
+  interestChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: '#4777c2',
+    backgroundColor: 'transparent',
+  },
+  interestChipSelected: {
+    backgroundColor: '#4777c2',
+    borderColor: '#4777c2',
+  },
+  interestChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4777c2',
+  },
+  interestChipTextSelected: {
+    color: '#fff',
+  },
+  locationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#4777c2',
+    backgroundColor: 'transparent',
+    marginBottom: 28,
+  },
+  locationBtnActive: {
+    backgroundColor: '#4777c2',
+    borderColor: '#4777c2',
+  },
+  locationBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4777c2',
+  },
+  locationBtnTextActive: {
+    color: '#fff',
+  },
+  timeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 36,
+  },
+  timeChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: 'transparent',
+  },
+  timeChipSelected: {
+    backgroundColor: '#4777c2',
+    borderColor: '#4777c2',
+  },
+  timeChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  timeChipTextSelected: {
+    color: '#fff',
+  },
+  startBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    borderRadius: 16,
+    backgroundColor: '#4777c2',
+    elevation: 4,
+    shadowColor: '#4777c2',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  startBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.3,
   },
 });

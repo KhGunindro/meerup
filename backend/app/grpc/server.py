@@ -4,14 +4,14 @@ import grpc
 
 from app.grpc.generated import meerup_pb2
 from app.grpc.generated import meerup_pb2_grpc
-
 from app.tourism.service import TourismService
 
 
 class MeerupAIServicer(meerup_pb2_grpc.MeerupAIServicer):
 
-    def __init__(self):
-        self.tourism_service = TourismService()
+    def __init__(self, tourism_service=None, vision_service=None):
+        self.tourism_service = tourism_service or TourismService()
+        self.vision_service = vision_service
 
     def GetNearbyDestinations(self, request, context):
 
@@ -86,8 +86,35 @@ class MeerupAIServicer(meerup_pb2_grpc.MeerupAIServicer):
         )
 
         return
-    
-def serve():
+
+    def RecognizeLandmark(self, request, context):
+        try:
+            if self.vision_service is None:
+                from app.vision.landmark_service import LandmarkStoryService
+
+                self.vision_service = LandmarkStoryService()
+
+            result = self.vision_service.recognize(request.image_data)
+            return meerup_pb2.LandmarkStoryResponse(
+                recognized=result.recognized,
+                place_id=result.place_id,
+                name=result.name,
+                confidence=result.confidence,
+                good_matches=result.good_matches,
+                description=result.description,
+                facts=result.facts,
+                highlights=result.highlights,
+                story=result.story,
+                llm_generated=result.llm_generated,
+            )
+        except Exception as e:
+            print("gRPC RecognizeLandmark error:", repr(e))
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Landmark recognition failed: {e}")
+            return meerup_pb2.LandmarkStoryResponse()
+
+
+def serve(port: int = 50051):
 
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=10)
@@ -99,7 +126,7 @@ def serve():
     )
 
     server.add_insecure_port(
-        "[::]:50051"
+        f"[::]:{port}"
     )
 
     server.start()
@@ -107,11 +134,12 @@ def serve():
     print("===================================")
     print("       MEERUP gRPC SERVER")
     print("===================================")
-    print("Listening on 0.0.0.0:50051")
+    print(f"Listening on 0.0.0.0:{port}")
     print("===================================")
 
-    server.wait_for_termination()
+    return server
 
 
 if __name__ == "__main__":
-    serve()
+    s = serve(50051)
+    s.wait_for_termination()

@@ -9,6 +9,9 @@ service MeerupAI {
 
   // Location-aware tourism discovery.
   rpc GetNearbyDestinations(NearbyRequest) returns (NearbyResponse);
+
+  // Vision-based landmark recognition and cultural storytelling.
+  rpc RecognizeLandmark(LandmarkPhotoRequest) returns (LandmarkStoryResponse);
 }
 
 message ChatRequest {
@@ -27,9 +30,6 @@ message Location {
 
 message ChatChunk {
   string text = 1;
-  
-  // The 'done' boolean was removed. gRPC natively signals when a stream is complete.
-  // 'type' is renumbered to 2.
   string type = 2; 
 }
 
@@ -43,10 +43,7 @@ message NearbyDestination {
   string id = 1;
   string name = 2;
   string description = 3;
-  
-  // Changed from 'category' to 'categories' to follow Protobuf style guidelines for repeated fields.
   repeated string categories = 4;
-  
   repeated string interests = 5;
   string district = 6;
   double latitude = 7;
@@ -58,4 +55,21 @@ message NearbyDestination {
 
 message NearbyResponse {
   repeated NearbyDestination destinations = 1;
+}
+
+message LandmarkPhotoRequest {
+  bytes image_data = 1;
+}
+
+message LandmarkStoryResponse {
+  bool recognized = 1;
+  string place_id = 2;
+  string name = 3;
+  float confidence = 4;
+  int32 good_matches = 5;
+  string description = 6;
+  repeated string facts = 7;
+  repeated string highlights = 8;
+  string story = 9;
+  bool llm_generated = 10;
 }

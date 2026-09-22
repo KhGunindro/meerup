@@ -3,7 +3,10 @@
 import grpc
 import warnings
 
-from app.grpc.generated import meerup_pb2 as meerup__pb2
+try:
+    from app.grpc.generated import meerup_pb2 as meerup__pb2
+except ImportError:
+    import meerup_pb2 as meerup__pb2
 
 GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__
@@ -44,6 +47,11 @@ class MeerupAIStub:
                 request_serializer=meerup__pb2.NearbyRequest.SerializeToString,
                 response_deserializer=meerup__pb2.NearbyResponse.FromString,
                 _registered_method=True)
+        self.RecognizeLandmark = channel.unary_unary(
+                '/meerup.MeerupAI/RecognizeLandmark',
+                request_serializer=meerup__pb2.LandmarkPhotoRequest.SerializeToString,
+                response_deserializer=meerup__pb2.LandmarkStoryResponse.FromString,
+                _registered_method=True)
 
 
 class MeerupAIServicer:
@@ -64,6 +72,13 @@ class MeerupAIServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RecognizeLandmark(self, request, context):
+        """Vision-based landmark recognition and cultural storytelling.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_MeerupAIServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -76,6 +91,11 @@ def add_MeerupAIServicer_to_server(servicer, server):
                     servicer.GetNearbyDestinations,
                     request_deserializer=meerup__pb2.NearbyRequest.FromString,
                     response_serializer=meerup__pb2.NearbyResponse.SerializeToString,
+            ),
+            'RecognizeLandmark': grpc.unary_unary_rpc_method_handler(
+                    servicer.RecognizeLandmark,
+                    request_deserializer=meerup__pb2.LandmarkPhotoRequest.FromString,
+                    response_serializer=meerup__pb2.LandmarkStoryResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -132,6 +152,33 @@ class MeerupAI:
             '/meerup.MeerupAI/GetNearbyDestinations',
             meerup__pb2.NearbyRequest.SerializeToString,
             meerup__pb2.NearbyResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RecognizeLandmark(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/meerup.MeerupAI/RecognizeLandmark',
+            meerup__pb2.LandmarkPhotoRequest.SerializeToString,
+            meerup__pb2.LandmarkStoryResponse.FromString,
             options,
             channel_credentials,
             insecure,

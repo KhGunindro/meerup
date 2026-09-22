@@ -53,6 +53,14 @@ export default function RootLayout() {
             title: 'Profile',
           }}
         />
+        {/* Detail screen — hidden from tab bar */}
+        <Tabs.Screen
+          name="destination/[id]"
+          options={{
+            href: null,
+            headerShown: false,
+          }}
+        />
       </Tabs>
     </ThemeProvider>
   );

@@ -38,6 +38,7 @@ export default function RootLayout() {
           name="meerup"
           options={{
             title: 'MEERUP',
+            headerShown: false,
           }}
         />
         <Tabs.Screen

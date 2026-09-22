@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package meerup;
+
+service MeerupAI {
+  // Main conversational AI endpoint.
+  // The response is streamed for low-latency interaction.
+  rpc Chat(ChatRequest) returns (stream ChatChunk);
+
+  // Location-aware tourism discovery.
+  rpc GetNearbyDestinations(NearbyRequest) returns (NearbyResponse);
+}
+
+message ChatRequest {
+  string message = 1;
+  Location location = 2;
+  repeated string interests = 3;
+  int32 available_minutes = 4;
+  string language = 5;
+  string session_id = 6;
+}
+
+message Location {
+  double latitude = 1;
+  double longitude = 2;
+}
+
+message ChatChunk {
+  string text = 1;
+  
+  // The 'done' boolean was removed. gRPC natively signals when a stream is complete.
+  // 'type' is renumbered to 2.
+  string type = 2; 
+}
+
+message NearbyRequest {
+  Location location = 1;
+  double radius_km = 2;
+  repeated string interests = 3;
+}
+
+message NearbyDestination {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  
+  // Changed from 'category' to 'categories' to follow Protobuf style guidelines for repeated fields.
+  repeated string categories = 4;
+  
+  repeated string interests = 5;
+  string district = 6;
+  double latitude = 7;
+  double longitude = 8;
+  int32 estimated_duration_minutes = 9;
+  double distance_km = 10;
+  string image_url = 11;
+}
+
+message NearbyResponse {
+  repeated NearbyDestination destinations = 1;
+}

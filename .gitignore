@@ -1,1 +1,49 @@
-./backend/.venv
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+backend/.venv/
+backend/venv/
+
+# Environment Variables
+.env
+*.env
+!.env.example
+
+# Node / Expo / React Native
+node_modules/
+frontend/node_modules/
+.expo/
+frontend/.expo/
+web-build/
+dist/
+
+# OS / Editors
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json

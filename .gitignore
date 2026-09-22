@@ -47,3 +47,18 @@ Thumbs.db
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+
+# Translation Engine & Media
+translation/venv
+translation/.env
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.safetensors
+*.bin
+*.onnx
+*.pt
+*.pth
+checkpoints/
+models/

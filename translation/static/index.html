@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meerup STS — IndicConformer English ⟷ Manipuri</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+Meetei+Mayek:wght@400;600;700&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <line x1="12" y1="19" x2="12" y2="22"></line>
+          </svg>
+        </div>
+        <div class="brand-info">
+          <h1>Meerup <span class="tag">Indic</span></h1>
+          <p class="subtitle">AI4Bharat IndicConformer ➔ IndicTrans2 ➔ IndicTTS</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div id="statusBadge" class="status-badge checking">
+          <span class="status-dot"></span>
+          <span id="statusText">Checking Indic Engine...</span>
+        </div>
+        <button id="settingsBtn" class="icon-btn" title="Indic Engine Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Translator Surface -->
+    <main class="main-surface">
+      <!-- Live Visualizer Canvas -->
+      <div class="visualizer-wrapper">
+        <canvas id="visualizerCanvas" width="800" height="90"></canvas>
+        <div id="recordingLabel" class="recording-label">
+          <span class="pulsing-circle"></span>
+          <span id="recordingText">Listening...</span>
+        </div>
+      </div>
+
+      <!-- Dual Speech Action Controls -->
+      <div class="speech-controls-grid">
+        <!-- English Speaker Side -->
+        <div class="speaker-card" id="cardEn">
+          <div class="card-lang-header">
+            <span class="lang-flag">🇬🇧</span>
+            <div>
+              <h3>English</h3>
+              <p class="lang-sub">Speak English ➔ Manipuri</p>
+            </div>
+          </div>
+
+          <button id="btnSpeakEn" class="ptt-btn btn-english" title="Tap to Speak English">
+            <div class="btn-ripple"></div>
+            <div class="btn-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="22"></line>
+              </svg>
+            </div>
+            <span class="btn-caption" id="captionEn">Speak English</span>
+          </button>
+        </div>
+
+        <!-- Direction Arrow -->
+        <div class="direction-indicator">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M7 16V4m0 0L3 8m4-4l4 4"></path>
+            <path d="M17 8v12m0 0l4-4m-4 4l-4-4"></path>
+          </svg>
+        </div>
+
+        <!-- Manipuri Speaker Side -->
+        <div class="speaker-card" id="cardMni">
+          <div class="card-lang-header">
+            <span class="lang-flag">🇮🇳</span>
+            <div>
+              <h3>Manipuri <span class="script-badge">ꯃꯤꯇꯩꯂꯣꯟ</span></h3>
+              <p class="lang-sub">Speak Manipuri ➔ English</p>
+            </div>
+          </div>
+
+          <button id="btnSpeakMni" class="ptt-btn btn-manipuri" title="Tap to Speak Manipuri">
+            <div class="btn-ripple"></div>
+            <div class="btn-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="22"></line>
+              </svg>
+            </div>
+            <span class="btn-caption" id="captionMni">Speak Manipuri</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Demo Audio Samples -->
+      <div class="demo-samples-bar" style="display:flex; justify-content:center; gap:12px; margin: 18px 0; flex-wrap:wrap;">
+        <button id="btnSampleKangla" class="sample-btn" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#e2e8f0; padding:8px 14px; border-radius:8px; cursor:pointer; font-size:0.85rem; display:flex; align-items:center; gap:6px; transition: background 0.2s;">
+          <span>🎙️</span> Test Voice: "Kangla Fort" (EN ➔ MNI)
+        </button>
+        <button id="btnSampleGreeting" class="sample-btn" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#e2e8f0; padding:8px 14px; border-radius:8px; cursor:pointer; font-size:0.85rem; display:flex; align-items:center; gap:6px; transition: background 0.2s;">
+          <span>🎙️</span> Test Voice: "Good Morning" (EN ➔ MNI)
+        </button>
+      </div>
+
+      <!-- Real-time Result Card -->
+      <div id="resultCard" class="result-card hidden">
+        <div class="result-header">
+          <span id="resultDirection" class="result-dir">English ➔ Manipuri</span>
+          <div class="result-meta">
+            <span id="resultProvider" class="provider-tag">IndicConformer</span>
+            <span id="resultLatency" class="latency-tag">⚡ 0ms</span>
+            <button id="btnReplayAudio" class="replay-btn" title="Replay Translation Audio">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <span>Play</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="result-body">
+          <div class="transcript-section">
+            <label class="section-label">Source Speech (IndicConformer ASR)</label>
+            <p id="sourceTranscript" class="transcript-text">—</p>
+          </div>
+
+          <div class="translation-section">
+            <label class="section-label">Translated Speech (IndicTrans2 ➔ IndicTTS)</label>
+            <p id="targetTranslation" class="translation-text manipuri-font">—</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Text Mode Bar -->
+      <div class="text-input-bar">
+        <input type="text" id="textInput" placeholder="Type a phrase to translate & synthesize via IndicTrans2..." autocomplete="off">
+        <select id="quickLangSelect" class="lang-select">
+          <option value="en_to_mni">EN ➔ MNI</option>
+          <option value="mni_to_en">MNI ➔ EN</option>
+        </select>
+        <button id="btnSendText" class="send-btn" title="Translate & Speak">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2>AI4Bharat Indic Engine</h2>
+          <button id="closeModalBtn" class="close-btn">&times;</button>
+        </div>
+        <p class="modal-desc">
+          Powered exclusively by <strong>AI4Bharat Indic models</strong>:
+          <br>• <strong>ASR</strong>: IndicConformer Hybrid CTC-RNNT
+          <br>• <strong>NMT</strong>: IndicTrans2 (1B)
+          <br>• <strong>TTS</strong>: IndicTTS
+        </p>
+
+        <form id="configForm" class="config-form">
+          <div class="form-group">
+            <label for="cfgHfToken">Hugging Face Access Token (HF_TOKEN)</label>
+            <input type="password" id="cfgHfToken" placeholder="hf_xxxxxxxxxxxxxxxxxxxx">
+            <span class="field-hint">Optional: Required only if downloading private or gated weights</span>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" id="cancelConfigBtn" class="btn-secondary">Cancel</button>
+            <button type="submit" id="saveConfigBtn" class="btn-primary">Save & Connect</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

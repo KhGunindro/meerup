@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package sts;
+
+service SpeechTranslationService {
+  rpc TranslateSpeech (SpeechTranslationRequest) returns (SpeechTranslationResponse);
+  rpc TranslateText (TextTranslationRequest) returns (TextTranslationResponse);
+  rpc CheckHealth (HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message SpeechTranslationRequest {
+  bytes audio_content = 1;
+  string audio_format = 2;       // "wav", "mp3"
+  string source_language = 3;    // "en" or "mni"
+  string target_language = 4;    // "mni" or "en"
+  string voice_gender = 5;       // "female" or "male"
+}
+
+message SpeechTranslationResponse {
+  string recognized_text = 1;
+  string translated_text = 2;
+  bytes audio_content = 3;
+  string audio_format = 4;
+  int64 latency_ms = 5;
+}
+
+message TextTranslationRequest {
+  string text = 1;
+  string source_language = 2;
+  string target_language = 3;
+  string voice_gender = 4;
+}
+
+message TextTranslationResponse {
+  string original_text = 1;
+  string translated_text = 2;
+  bytes audio_content = 3;
+  string audio_format = 4;
+  int64 latency_ms = 5;
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string status = 1;
+  bool bhashini_configured = 2;
+}

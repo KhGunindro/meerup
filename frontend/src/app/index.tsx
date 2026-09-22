@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Image,
   ScrollView,
@@ -15,14 +15,61 @@ import { useRouter } from 'expo-router';
 import { Colors, MaxContentWidth } from '@/constants/theme';
 import { getDestImg } from '@/constants/images';
 import { DESTINATIONS } from '@/constants/destinations';
+import { useLocation } from '@/hooks/use-location';
 
 const HOME_CARDS = DESTINATIONS.slice(0, 3);
+
+function getTimeOfDayInfo() {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) {
+    return {
+      greeting: 'Good morning, Explorer',
+      sub: 'The valley mist is lifting over the sacred groves.\nWhere shall we wander?',
+      period: 'Morning Mist',
+      temp: '22°C',
+    };
+  } else if (hour >= 12 && hour < 17) {
+    return {
+      greeting: 'Good afternoon, Explorer',
+      sub: 'Sunlight illuminates the ancient citadels and bustling markets.\nWhere would you like to explore?',
+      period: 'Sunny Valley',
+      temp: '26°C',
+    };
+  } else if (hour >= 17 && hour < 21) {
+    return {
+      greeting: 'Good evening, Explorer',
+      sub: 'Dusk settles over Loktak Lake and temple bells echo.\nReady for an evening stroll?',
+      period: 'Golden Hour',
+      temp: '23°C',
+    };
+  } else {
+    return {
+      greeting: 'Peaceful night, Explorer',
+      sub: 'The quiet stars watch over the tranquil Manipur valley.\nPlanning tomorrow’s adventure?',
+      period: 'Starlit Night',
+      temp: '19°C',
+    };
+  }
+}
 
 export default function HomeScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const isDark = scheme === 'dark';
   const router = useRouter();
+  const { location, locationLabel, getFormattedDistance } = useLocation();
+  const timeInfo = useMemo(() => getTimeOfDayInfo(), []);
+  const [meerupQuery, setMeerupQuery] = useState('');
+
+  const handleAskMeerup = (query?: string) => {
+    const text = (query ?? meerupQuery).trim();
+    if (!text) return;
+    setMeerupQuery('');
+    router.push({
+      pathname: '/meerup',
+      params: { prompt: text },
+    } as any);
+  };
 
   const cardBg = isDark ? colors.backgroundElement : '#FFFFFF';
   const sectionBg = isDark ? colors.backgroundElement : '#F8F9FB';
@@ -41,12 +88,14 @@ export default function HomeScreen() {
           </Text>
           <View style={[styles.weatherPill, { backgroundColor: sectionBg, borderColor: colors.border }]}>
             <View style={[styles.liveIndicator, { backgroundColor: '#22C55E' }]} />
-            <Text style={[styles.weatherText, { color: colors.textSecondary }]}>24°C · Golden Hour</Text>
+            <Text style={[styles.weatherText, { color: colors.textSecondary }]}>
+              {timeInfo.temp} · {timeInfo.period}
+            </Text>
           </View>
         </View>
-        <Text style={[styles.greetTitle, { color: colors.text }]}>Good morning, Explorer</Text>
+        <Text style={[styles.greetTitle, { color: colors.text }]}>{timeInfo.greeting}</Text>
         <Text style={[styles.greetSub, { color: colors.textSecondary }]}>
-          The valley mist is lifting over the sacred groves.{'\n'}Where shall we wander?
+          {timeInfo.sub}
         </Text>
       </View>
 
@@ -59,23 +108,40 @@ export default function HomeScreen() {
           </View>
         </View>
         <View style={[styles.inputRow, { backgroundColor: sectionBg, borderColor: colors.border }]}>
-          <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
+          <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.textSecondary} />
           <TextInput
             style={[styles.input, { color: colors.text }]}
-            placeholder="Inquire about history, rituals, or places..."
+            placeholder="Ask MEERUP about places, food, rituals..."
             placeholderTextColor={colors.textSecondary}
-            editable={false}
+            value={meerupQuery}
+            onChangeText={setMeerupQuery}
+            onSubmitEditing={() => handleAskMeerup()}
+            returnKeyType="send"
           />
-          <TouchableOpacity>
-            <Ionicons name="camera-outline" size={18} color={colors.textSecondary} />
+          <TouchableOpacity
+            style={[styles.sendAskBtn, { backgroundColor: meerupQuery.trim() ? colors.primary : (isDark ? '#2A2C38' : '#E5E7EB') }]}
+            onPress={() => handleAskMeerup()}
+            disabled={!meerupQuery.trim()}
+            accessibilityLabel="Send to MEERUP"
+          >
+            <Ionicons
+              name="arrow-up"
+              size={15}
+              color={meerupQuery.trim() ? '#FFFFFF' : colors.textSecondary}
+            />
           </TouchableOpacity>
         </View>
         <View style={styles.pillsRow}>
-          {['3-hour cultural tour', 'Sacred etiquette', 'Best food spots'].map((label) => (
-            <View key={label} style={[styles.filterPill, { backgroundColor: sectionBg, borderColor: colors.border }]}>
-              <Ionicons name="time-outline" size={12} color={colors.textSecondary} />
-              <Text style={[styles.filterPillText, { color: colors.textSecondary }]}>{label}</Text>
-            </View>
+          {['Best sightseeing places', 'Where to find Chak-hao?', 'Story of Kangla Fort'].map((label) => (
+            <TouchableOpacity
+              key={label}
+              onPress={() => handleAskMeerup(label)}
+              style={[styles.filterPill, { backgroundColor: sectionBg, borderColor: colors.border }]}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="sparkles-outline" size={12} color={colors.accent} />
+              <Text style={[styles.filterPillText, { color: colors.text }]}>{label}</Text>
+            </TouchableOpacity>
           ))}
         </View>
       </View>
@@ -132,6 +198,8 @@ export default function HomeScreen() {
             icon: 'business-outline' as const,
             id: 'kangla-fort',
             title: 'Kangla Fort',
+            lat: 24.8080,
+            lng: 93.9400,
             dist: '350m',
             open: true,
             openText: 'Open until 6:00 PM today',
@@ -141,45 +209,50 @@ export default function HomeScreen() {
             icon: 'storefront-outline' as const,
             id: 'ima-keithel',
             title: 'Ima Keithel',
+            lat: 24.8074,
+            lng: 93.9358,
             dist: '800m',
             open: false,
             openText: 'Opens at 7:00 AM',
             sub: 'Royal polo relics, handlooms & ...',
           },
-        ].map((item) => (
-          <TouchableOpacity
-            key={item.title}
-            activeOpacity={0.85}
-            onPress={() => router.push(('/destination/' + item.id) as any)}
-            style={[styles.nearCard, { backgroundColor: cardBg, borderColor: colors.border }]}>
-            <View style={[styles.nearIcon, { backgroundColor: isDark ? '#1A1C24' : '#F3F4F6' }]}>
-              <Ionicons name={item.icon} size={22} color={colors.primary} />
-            </View>
-            <View style={styles.nearInfo}>
-              <View style={styles.nearTopRow}>
-                <Text style={[styles.nearTitle, { color: colors.text }]}>{item.title}</Text>
-                <View style={[styles.nearOpenBadge, {
-                  backgroundColor: item.open
-                    ? (isDark ? '#052E16' : '#DCFCE7')
-                    : (isDark ? '#1C1917' : '#F3F4F6'),
-                }]}>
-                  <Text style={[styles.nearOpenText, { color: item.open ? '#16A34A' : colors.textSecondary }]}>
-                    {item.open ? 'Open' : 'Closed'}
-                  </Text>
-                </View>
+        ].map((item) => {
+          const liveDist = getFormattedDistance(item.lat, item.lng, item.dist);
+          return (
+            <TouchableOpacity
+              key={item.title}
+              activeOpacity={0.85}
+              onPress={() => router.push(('/destination/' + item.id) as any)}
+              style={[styles.nearCard, { backgroundColor: cardBg, borderColor: colors.border }]}>
+              <View style={[styles.nearIcon, { backgroundColor: isDark ? '#1A1C24' : '#F3F4F6' }]}>
+                <Ionicons name={item.icon} size={22} color={colors.primary} />
               </View>
-              <Text style={[styles.nearDist, { color: colors.accent }]}>
-                {item.dist} · {item.openText}
-              </Text>
-              <Text style={[styles.nearSub, { color: colors.textSecondary }]} numberOfLines={1}>
-                {item.sub}
-              </Text>
-            </View>
-            <View style={[styles.nearArrow, { backgroundColor: sectionBg }]}>
-              <Ionicons name="navigate-outline" size={16} color={colors.primary} />
-            </View>
-          </TouchableOpacity>
-        ))}
+              <View style={styles.nearInfo}>
+                <View style={styles.nearTopRow}>
+                  <Text style={[styles.nearTitle, { color: colors.text }]}>{item.title}</Text>
+                  <View style={[styles.nearOpenBadge, {
+                    backgroundColor: item.open
+                      ? (isDark ? '#052E16' : '#DCFCE7')
+                      : (isDark ? '#1C1917' : '#F3F4F6'),
+                  }]}>
+                    <Text style={[styles.nearOpenText, { color: item.open ? '#16A34A' : colors.textSecondary }]}>
+                      {item.open ? 'Open' : 'Closed'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={[styles.nearDist, { color: colors.accent }]}>
+                  {liveDist} · {item.openText}
+                </Text>
+                <Text style={[styles.nearSub, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {item.sub}
+                </Text>
+              </View>
+              <View style={[styles.nearArrow, { backgroundColor: sectionBg }]}>
+                <Ionicons name="navigate-outline" size={16} color={colors.primary} />
+              </View>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* ── HAPPENING SOON ───────────────────────── */}
@@ -204,7 +277,7 @@ export default function HomeScreen() {
           {
             id: 'sangai-festival',
             imgId: 'thabal',
-            tag: 'Dec 3-4 · Imphal Valley',
+            tag: 'Mar 16-22 · Imphal Valley',
             name: 'Yaoshang Thabal Chongba',
             desc: 'Traditional moonlit circle dance uniting valley youth under lantern-lit bamboo groves with live percussion.',
             cta: 'Learn More',
@@ -328,9 +401,13 @@ const styles = StyleSheet.create({
   sparkleChip: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   inputRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10,
+    borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8,
   },
   input: { flex: 1, fontSize: 13, padding: 0 },
+  sendAskBtn: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+  },
   pillsRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   filterPill: {
     flexDirection: 'row', alignItems: 'center', gap: 5,

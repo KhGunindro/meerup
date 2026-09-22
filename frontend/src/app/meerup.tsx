@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLocalSearchParams } from 'expo-router';
 import type { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { speechToSpeech, transcribeAudio } from '@/utils/meerupApi';
@@ -280,6 +281,8 @@ interface ChatMessage {
 type LLMHistory = Array<{ role: 'user' | 'assistant'; content: string }>;
 
 export default function MeerupScreen() {
+  const params = useLocalSearchParams<{ prompt?: string }>();
+  const initialPromptHandled = useRef<string | null>(null);
 
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme();
@@ -364,6 +367,31 @@ export default function MeerupScreen() {
     setLocLoading(false);
   };
 
+  useEffect(() => {
+    // Automatically detect real location if permissions exist
+    (async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setUserContext(prev => ({
+            ...prev,
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+          }));
+          const geo = await Location.reverseGeocodeAsync(loc.coords);
+          if (geo[0]) {
+            setLocationLabel(`${geo[0].district || geo[0].city || 'Your location'}, Manipur`);
+          } else {
+            setLocationLabel('Location detected');
+          }
+        }
+      } catch (e) {
+        // Silently fail if not yet permitted
+      }
+    })();
+  }, []);
+
   const finishOnboarding = () => setShowOnboarding(false);
 
   const handleNewChat = () => {
@@ -424,6 +452,14 @@ export default function MeerupScreen() {
       setTimeout(() => setAiState('idle'), 1500);
     }
   };
+
+  useEffect(() => {
+    if (params.prompt && initialPromptHandled.current !== params.prompt) {
+      initialPromptHandled.current = params.prompt;
+      setShowOnboarding(false);
+      handleSendText(params.prompt);
+    }
+  }, [params.prompt]);
 
 
   const [recording, setRecording] = useState<Audio.Recording | null>(null);

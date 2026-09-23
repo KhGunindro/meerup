@@ -67,8 +67,8 @@ export default function HomeScreen() {
   useEffect(() => {
     const fetchWeather = async () => {
       try {
-        const lat = (location as any)?.lat || 24.8170; // Default to Imphal
-        const lng = (location as any)?.lng || 93.9368;
+        const lat = location?.latitude || (location as any)?.lat || 24.8170; // Default to Imphal
+        const lng = location?.longitude || (location as any)?.lng || 93.9368;
         const res = await fetch(
           `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`
         );
@@ -93,7 +93,7 @@ export default function HomeScreen() {
       }
     };
     fetchWeather();
-  }, [(location as any)?.lat, (location as any)?.lng]);
+  }, [location?.latitude, location?.longitude]);
 
   const handleAskMeerup = (query?: string) => {
     const text = (query ?? meerupQuery).trim();

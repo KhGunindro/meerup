@@ -14,7 +14,6 @@ import { AudioGuide } from '@/constants/destinations';
 import { Colors } from '@/constants/theme';
 import {
   synthesizeTextToSpeech,
-  fetchAutoAudioTranscript,
   fetchPregeneratedAudioGuide,
 } from '@/utils/meerupApi';
 import { PREGENERATED_STORIES, getPregeneratedAudio } from '@/constants/pregeneratedStories';
@@ -47,29 +46,22 @@ export function AudioGuidePlayer({
 }: AudioGuidePlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
-  const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
   const [selectedLang, setSelectedLang] = useState<'en' | 'mni'>('en');
 
-  // Match pregenerated guide key (e.g. kangla-fort, loktak-lake, ima-keithel, etc.)
-  const guideKey = (destinationId || guide.title || '')
+  // Match pregenerated guide key reliably across destinationId, destinationName, and title
+  const searchStr = `${destinationId || ''} ${destinationName || ''} ${guide.title || ''}`
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, '-');
+    .replace(/[^a-z0-9]/g, ' ');
+
   const matchedPregenKey =
-    Object.keys(PREGENERATED_STORIES).find(
-      (k) => guideKey.includes(k) || k.includes(guideKey)
-    ) || '';
+    (destinationId && PREGENERATED_STORIES[destinationId] ? destinationId : '') ||
+    Object.keys(PREGENERATED_STORIES).find((k) => {
+      const cleanK = k.replace(/-/g, ' ');
+      return searchStr.includes(cleanK) || (cleanK.length > 3 && cleanK.includes(searchStr.trim()));
+    }) ||
+    '';
 
   const pregenStory = matchedPregenKey ? PREGENERATED_STORIES[matchedPregenKey] : null;
-
-  // Initialize transcripts directly from pregenerated stories for instant 0ms render
-  const [autoTranscripts, setAutoTranscripts] = useState<Record<string, string>>(() => {
-    const initial: Record<string, string> = {};
-    if (pregenStory) {
-      initial.en = pregenStory.transcriptEn;
-      initial.mni = pregenStory.transcriptMni;
-    }
-    return initial;
-  });
 
   // Sound instance references
   const activeNativePlayerRef = useRef<any>(null);
@@ -78,16 +70,33 @@ export function AudioGuidePlayer({
   const isWebViewLoadedRef = useRef<boolean>(false);
   // Cache base64 audio per language so repeat plays are instant
   const audioCacheRef = useRef<Record<string, string>>({});
+  const currentLoadedTrackKeyRef = useRef<string>('');
 
-  // Pre-seed audioCache from pregenerated store immediately
+  const targetTrackKey = `${matchedPregenKey || destinationId || guide.title}_${selectedLang}`;
+
+  // Fallback language object if offline
+  const activeLangObj =
+    guide.languages?.find((l) => l.code === selectedLang) || guide.languages?.[0];
+
+  // Instant deterministic story transcript matching current destination & language
+  const activeTranscript =
+    (selectedLang === 'mni' ? pregenStory?.transcriptMni : pregenStory?.transcriptEn) ||
+    activeLangObj?.text ||
+    `Welcome to ${guide.title}. Explore the sacred history, mythical lore, and timeless heritage of Manipur.`;
+
+  // Reset & re-seed audioCache whenever destination or language changes
   useEffect(() => {
+    stopAllAudio();
+    audioCacheRef.current = {};
+    currentLoadedTrackKeyRef.current = '';
+
     if (matchedPregenKey) {
       const enAudio = getPregeneratedAudio(matchedPregenKey, 'en');
       const mniAudio = getPregeneratedAudio(matchedPregenKey, 'mni');
       if (enAudio) audioCacheRef.current['en'] = enAudio;
       if (mniAudio) audioCacheRef.current['mni'] = mniAudio;
 
-      // Also ensure backend pregenerated fallback is ready if needed
+      // Backend fallback check if local is missing
       if (!audioCacheRef.current[selectedLang]) {
         fetchPregeneratedAudioGuide(matchedPregenKey, selectedLang)
           .then((res) => {
@@ -98,48 +107,7 @@ export function AudioGuidePlayer({
           .catch(() => {});
       }
     }
-  }, [matchedPregenKey, selectedLang]);
-
-  // Fallback language object if offline
-  const activeLangObj =
-    guide.languages.find((l) => l.code === selectedLang) || guide.languages[0];
-
-  // Auto-generate narration transcript from AI model on demand
-  const getOrFetchTranscript = async (lang: 'en' | 'mni', forceRefresh = false): Promise<string> => {
-    if (!forceRefresh && autoTranscripts[lang]) {
-      return autoTranscripts[lang];
-    }
-    setIsLoadingTranscript(true);
-    try {
-      const res = await fetchAutoAudioTranscript(
-        guide.title,
-        destinationName,
-        undefined,
-        lang
-      );
-      if (res && res.transcript) {
-        setAutoTranscripts((prev) => ({ ...prev, [lang]: res.transcript }));
-        return res.transcript;
-      }
-    } catch (e) {
-      console.warn('Auto transcript generation notice:', e);
-    } finally {
-      setIsLoadingTranscript(false);
-    }
-    return activeLangObj?.text || guide.title;
-  };
-
-  // If no pregenerated story exists, request model transcript on mount and on language toggle
-  useEffect(() => {
-    if (!autoTranscripts[selectedLang]) {
-      getOrFetchTranscript(selectedLang);
-    }
-  }, [selectedLang, guide.title]);
-
-  const activeTranscript =
-    autoTranscripts[selectedLang] ||
-    activeLangObj?.text ||
-    `Welcome to ${guide.title}. Explore the sacred history, mythical lore, and timeless heritage of Manipur.`;
+  }, [destinationId, matchedPregenKey, selectedLang]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -159,7 +127,7 @@ export function AudioGuidePlayer({
     if (webViewRef.current) {
       try {
         webViewRef.current.injectJavaScript(
-          'if (window._guideAudio) { window._guideAudio.pause(); window._guideAudio.currentTime = 0; } true;'
+          'if (window._guideAudio) { window._guideAudio.pause(); window._guideAudio.currentTime = 0; delete window._guideAudio; } true;'
         );
       } catch (e) {}
     }
@@ -174,45 +142,43 @@ export function AudioGuidePlayer({
       (window as any).speechSynthesis.cancel();
     }
     isWebViewLoadedRef.current = false;
+    currentLoadedTrackKeyRef.current = '';
     setIsPlaying(false);
   };
 
   // Play audio synthesized by AI4Bharat / Neural model or instant pregenerated audio
   const playAudio = async () => {
-    // 1. Resume if already loaded & paused
-    if (activeNativePlayerRef.current) {
-      try {
-        activeNativePlayerRef.current.play();
-        setIsPlaying(true);
-        return;
-      } catch (e) {}
-    }
-    if (webViewRef.current && isWebViewLoadedRef.current) {
-      try {
-        webViewRef.current.injectJavaScript(
-          'if (window._guideAudio) { window._guideAudio.play(); } true;'
-        );
-        setIsPlaying(true);
-        return;
-      } catch (e) {}
-    }
-    if (webAudioRef.current) {
-      try {
-        await webAudioRef.current.play();
-        setIsPlaying(true);
-        return;
-      } catch (e) {}
+    // 1. Resume if already loaded & paused for THIS exact destination and language
+    if (currentLoadedTrackKeyRef.current === targetTrackKey) {
+      if (activeNativePlayerRef.current) {
+        try {
+          activeNativePlayerRef.current.play();
+          setIsPlaying(true);
+          return;
+        } catch (e) {}
+      }
+      if (webViewRef.current && isWebViewLoadedRef.current) {
+        try {
+          webViewRef.current.injectJavaScript(
+            'if (window._guideAudio) { window._guideAudio.play(); } true;'
+          );
+          setIsPlaying(true);
+          return;
+        } catch (e) {}
+      }
+      if (webAudioRef.current) {
+        try {
+          await webAudioRef.current.play();
+          setIsPlaying(true);
+          return;
+        } catch (e) {}
+      }
     }
 
     await stopAllAudio();
     setIsLoadingAudio(true);
 
     try {
-      let transcriptText = autoTranscripts[selectedLang];
-      if (!transcriptText) {
-        transcriptText = await getOrFetchTranscript(selectedLang);
-      }
-
       // 1. Check in-memory audioCache
       let b64 = audioCacheRef.current[selectedLang];
 
@@ -238,7 +204,7 @@ export function AudioGuidePlayer({
 
       // 4. Live neural TTS synthesis if not pregenerated
       if (!b64) {
-        const result = await synthesizeTextToSpeech(transcriptText, selectedLang, 'female');
+        const result = await synthesizeTextToSpeech(activeTranscript, selectedLang, 'female');
         if (result.audioBase64) {
           b64 = result.audioBase64;
           audioCacheRef.current[selectedLang] = b64;
@@ -261,6 +227,7 @@ export function AudioGuidePlayer({
           };
 
           await snd.play();
+          currentLoadedTrackKeyRef.current = targetTrackKey;
           setIsPlaying(true);
           setIsLoadingAudio(false);
           return;
@@ -276,7 +243,7 @@ export function AudioGuidePlayer({
               }).catch(() => {});
             }
 
-            const tempUri = `${FileSystem.cacheDirectory}guide_${matchedPregenKey || 'story'}_${selectedLang}.wav`;
+            const tempUri = `${FileSystem.cacheDirectory}guide_${matchedPregenKey || destinationId || 'story'}_${selectedLang}.wav`;
             await FileSystem.writeAsStringAsync(tempUri, cleanB64, {
               encoding: FileSystem.EncodingType?.Base64 || 'base64',
             });
@@ -290,6 +257,7 @@ export function AudioGuidePlayer({
             });
 
             player.play();
+            currentLoadedTrackKeyRef.current = targetTrackKey;
             setIsPlaying(true);
             setIsLoadingAudio(false);
             return;
@@ -306,6 +274,7 @@ export function AudioGuidePlayer({
                 try {
                   if (window._guideAudio) {
                     window._guideAudio.pause();
+                    window._guideAudio.currentTime = 0;
                   }
                   var audio = new Audio("data:audio/wav;base64,${cleanB64}");
                   window._guideAudio = audio;
@@ -332,6 +301,7 @@ export function AudioGuidePlayer({
             `;
             webViewRef.current.injectJavaScript(playScript);
             isWebViewLoadedRef.current = true;
+            currentLoadedTrackKeyRef.current = targetTrackKey;
             setIsPlaying(true);
             setIsLoadingAudio(false);
             return;
@@ -353,6 +323,7 @@ export function AudioGuidePlayer({
         setIsPlaying(false);
       };
       window.speechSynthesis.speak(utterance);
+      currentLoadedTrackKeyRef.current = targetTrackKey;
       setIsPlaying(true);
     }
 
@@ -394,15 +365,7 @@ export function AudioGuidePlayer({
   const handleLangChange = async (langCode: 'en' | 'mni') => {
     if (langCode === selectedLang) return;
     await stopAllAudio();
-    setIsPlaying(false);
     setSelectedLang(langCode);
-  };
-
-  const handleRegenerate = async () => {
-    await stopAllAudio();
-    setIsPlaying(false);
-    delete audioCacheRef.current[selectedLang];
-    await getOrFetchTranscript(selectedLang, true);
   };
 
   // Theme palettes
@@ -456,63 +419,29 @@ export function AudioGuidePlayer({
         </View>
       </View>
 
-      {/* ── Title (No Dr. Sanatombi Devi line) ───────────────────────────────── */}
+      {/* ── Title ───────────────────────────────────────────────────────────── */}
       <View style={styles.titleSection}>
         <Text style={[styles.mainTitle, { color: isDark ? '#F8FAFC' : '#0F172A' }]} numberOfLines={2}>
           {guide.title}
         </Text>
       </View>
 
-      {/* ── Auto-Generated Transcript Card ─────────────────────────────────── */}
+      {/* ── Story Narration Text (Clean, no unwanted AI badge or new story button) ─── */}
       <View style={[styles.transcriptContainer, { backgroundColor: glassInner, borderColor: cardBorder }]}>
-        <View style={styles.transcriptMetaRow}>
-          <View style={styles.transcriptLiveTag}>
-            <Ionicons name="sparkles" size={13} color={accentTeal} />
-            <Text style={styles.transcriptTagText}>
-              {selectedLang === 'mni' ? 'AI ꯃꯣꯗꯦꯜ ꯇ꯭ꯔꯥꯟꯁꯀ꯭ꯔꯤꯞ' : 'AI MODEL TRANSCRIPT'}
-            </Text>
-          </View>
-
-          {/* Regenerate Story Button */}
-          <TouchableOpacity
-            style={styles.regenerateBtn}
-            onPress={handleRegenerate}
-            disabled={isLoadingTranscript}
-            activeOpacity={0.7}>
-            <Ionicons
-              name="refresh"
-              size={12}
-              color={isLoadingTranscript ? '#94A3B8' : accentTeal}
-            />
-            <Text style={[styles.regenerateText, { color: accentTeal }]}>New Story</Text>
-          </TouchableOpacity>
-        </View>
-
-        {isLoadingTranscript && !autoTranscripts[selectedLang] ? (
-          <View style={styles.transcriptLoader}>
-            <ActivityIndicator size="small" color={accentTeal} />
-            <Text style={[styles.loaderText, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-              {selectedLang === 'mni'
-                ? 'AI ꯃꯣꯗꯦꯜꯅ ꯃꯅꯤꯄꯨꯔꯤ ꯋꯥꯔꯤ ꯁꯦꯝꯂꯤ...'
-                : 'Composing story transcript with AI model...'}
-            </Text>
-          </View>
-        ) : (
-          <Text
-            style={[
-              styles.transcriptContentText,
-              {
-                color: isDark ? '#CBD5E1' : '#334155',
-                lineHeight: selectedLang === 'mni' ? 24 : 22,
-                fontSize: selectedLang === 'mni' ? 14 : 13.5,
-              },
-            ]}>
-            "{activeTranscript}"
-          </Text>
-        )}
+        <Text
+          style={[
+            styles.transcriptContentText,
+            {
+              color: isDark ? '#CBD5E1' : '#334155',
+              lineHeight: selectedLang === 'mni' ? 24 : 22,
+              fontSize: selectedLang === 'mni' ? 14 : 13.5,
+            },
+          ]}>
+          "{activeTranscript}"
+        </Text>
       </View>
 
-      {/* ── Only Play Button (No Scrubber, No Bars, No Speed, No -15s/+15s) ─── */}
+      {/* ── Master Play Button ────────────────────────────────────────────── */}
       <TouchableOpacity
         style={[
           styles.masterPlayBtn,
@@ -651,46 +580,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 14,
     marginBottom: 14,
-  },
-  transcriptMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  transcriptLiveTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  transcriptTagText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#0D9488',
-    letterSpacing: 0.8,
-  },
-  regenerateBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    backgroundColor: 'rgba(13, 148, 136, 0.1)',
-  },
-  regenerateText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-  },
-  transcriptLoader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-  },
-  loaderText: {
-    fontSize: 12,
-    fontStyle: 'italic',
   },
   transcriptContentText: {
     fontStyle: 'italic',

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -122,13 +123,17 @@ def get_pregenerated_cache() -> dict[str, Any]:
 
 def find_pregenerated_match(key_or_name: str) -> tuple[str, dict[str, Any]] | None:
     cache = get_pregenerated_cache()
-    if not cache:
+    if not cache or not key_or_name or not key_or_name.strip():
         return None
-    normalized = key_or_name.lower().replace(" ", "-").replace("_", "")
+    normalized = re.sub(r"[^a-z0-9]", "", key_or_name.lower())
+    if not normalized:
+        return None
     for k, v in cache.items():
-        clean_k = k.lower().replace("-", "").replace("_", "")
-        clean_title = v.get("title", "").lower()
-        if clean_k in normalized or normalized in clean_k or clean_title in normalized or normalized in clean_title:
+        clean_k = re.sub(r"[^a-z0-9]", "", k.lower())
+        clean_title = re.sub(r"[^a-z0-9]", "", v.get("title", "").lower())
+        if clean_k in normalized or normalized in clean_k:
+            return k, v
+        if clean_title and (clean_title in normalized or normalized in clean_title):
             return k, v
     return None
 
@@ -183,7 +188,7 @@ async def generate_audio_guide_transcript(
     narrator = request.narrator or "Cultural Historian"
 
     # 1. First check pregenerated store for instantaneous return
-    match = find_pregenerated_match(dest or title)
+    match = find_pregenerated_match(dest) or find_pregenerated_match(title)
     if match:
         data = match[1]
         t = data.get("transcriptMni" if request.language == "mni" else "transcriptEn", "")

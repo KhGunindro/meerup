@@ -160,6 +160,7 @@ export default function DestinationDetail() {
         {/* ── AUDIO GUIDE COMPANION ────────────────── */}
         {dest.audioGuide && (
           <AudioGuidePlayer
+            key={dest.id}
             guide={dest.audioGuide}
             colors={colors}
             isDark={isDark}

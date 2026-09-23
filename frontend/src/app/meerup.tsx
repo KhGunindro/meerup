@@ -333,8 +333,44 @@ try {
   // expo-audio fallback handled
 }
 
+let activeWebAudio: any = null;
+let activeNativeSound: any = null;
+
+export const stopSpeechAudio = async (webViewRef?: any) => {
+  try {
+    if (activeWebAudio) {
+      activeWebAudio.pause();
+      activeWebAudio.currentTime = 0;
+      activeWebAudio = null;
+    }
+    if (activeNativeSound) {
+      if (typeof activeNativeSound.stop === 'function') activeNativeSound.stop();
+      if (typeof activeNativeSound.stopAsync === 'function') await activeNativeSound.stopAsync();
+      if (typeof activeNativeSound.unloadAsync === 'function') await activeNativeSound.unloadAsync();
+      activeNativeSound = null;
+    }
+    if (webViewRef && webViewRef.current) {
+      webViewRef.current.injectJavaScript(`
+        (function() {
+          var audios = document.querySelectorAll('audio');
+          audios.forEach(function(a) { a.pause(); a.currentTime = 0; });
+        })();
+        true;
+      `);
+    }
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as any).speechSynthesis) {
+      (window as any).speechSynthesis.cancel();
+    }
+  } catch (e) {
+    console.warn('stopSpeechAudio notice:', e);
+  }
+};
+
 export const playSpeechAudio = async (base64Data: string, webViewRef?: any) => {
   if (!base64Data) return;
+
+  // Stop any currently playing audio first
+  await stopSpeechAudio(webViewRef);
 
   const cleanB64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
 
@@ -342,6 +378,7 @@ export const playSpeechAudio = async (base64Data: string, webViewRef?: any) => {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as any).Audio) {
     try {
       const snd = new (window as any).Audio(`data:audio/wav;base64,${cleanB64}`);
+      activeWebAudio = snd;
       await snd.play();
       return;
     } catch (e) {
@@ -357,6 +394,7 @@ export const playSpeechAudio = async (base64Data: string, webViewRef?: any) => {
         encoding: FileSystem.EncodingType?.Base64 || 'base64',
       });
       const player = createAudioPlayer(tempUri);
+      activeNativeSound = player;
       player.play();
       return;
     }
@@ -370,6 +408,7 @@ export const playSpeechAudio = async (base64Data: string, webViewRef?: any) => {
       const outUri = `${FileSystem.cacheDirectory}speech_reply_${Date.now()}.wav`;
       await FileSystem.writeAsStringAsync(outUri, cleanB64, { encoding: FileSystem.EncodingType.Base64 });
       const { sound } = await AudioRuntime.Sound.createAsync({ uri: outUri });
+      activeNativeSound = sound;
       await sound.playAsync();
       return;
     } catch (e) {
@@ -619,14 +658,10 @@ export default function MeerupScreen() {
     setAiState('idle');
     setShowOnboarding(true);
   };
-  // ──────────────────────────────────────────────────────────────────
 
-
-  useEffect(() => {
-    if (isVoiceMode && aiState === 'idle' && !isMicMuted) {
-      startRecording();
-    }
-  }, [aiState, isVoiceMode, isMicMuted]);
+  // Latest conversation items for Voice Assistant display
+  const latestAiMessage = useMemo(() => [...messages].reverse().find(m => m.role === 'ai'), [messages]);
+  const latestUserMessage = useMemo(() => [...messages].reverse().find(m => m.role === 'user'), [messages]);
 
   const handleSendText = async (overrideText?: string) => {
     const text = (overrideText ?? inputText).trim();
@@ -965,6 +1000,28 @@ export default function MeerupScreen() {
     handleAudioUnavailable('Microphone is not available in this environment. Type below or tap a prompt to hear MEERUP speak!');
   };
 
+  const handleStopAll = async () => {
+    await stopSpeechAudio(webViewRef);
+    if (recording) {
+      try {
+        if (audioRecorder && audioRecorder.isRecording) {
+          await audioRecorder.stop();
+        } else if (typeof recording.stopAndUnloadAsync === 'function') {
+          await recording.stopAndUnloadAsync();
+        }
+      } catch (e) {
+        console.warn('Stop recording err:', e);
+      }
+      setRecording(null);
+    }
+    if (silenceTimer.current) {
+      clearTimeout(silenceTimer.current);
+      silenceTimer.current = null;
+    }
+    setAiState('idle');
+    setIsSpeaking(false);
+  };
+
   const toggleListening = async () => {
     if (aiState === 'idle') {
       await startRecording();
@@ -975,8 +1032,10 @@ export default function MeerupScreen() {
         setAiState('idle');
         setIsSpeaking(false);
       }
+    } else if (aiState === 'speaking') {
+      await handleStopAll();
     } else {
-      setAiState('idle');
+      await handleStopAll();
     }
   };
 
@@ -1459,89 +1518,207 @@ export default function MeerupScreen() {
       )}
 
       {isVoiceMode && (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000', zIndex: 999, justifyContent: 'space-between' }]}>
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0B0F19', zIndex: 999, justifyContent: 'space-between' }]}>
           {/* Header */}
-          <View style={{ height: Math.max(insets.top, 20) + 10 }} />
+          <View style={{ paddingTop: Math.max(insets.top, 20), paddingHorizontal: 20, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <TouchableOpacity
+              style={styles.voiceTopBtn}
+              onPress={() => {
+                handleStopAll();
+                setIsVoiceMode(false);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Close voice mode"
+            >
+              <MaterialIcons name="close" size={22} color="#9CA3AF" />
+            </TouchableOpacity>
 
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: aiState === 'listening' ? '#3B82F6' : aiState === 'thinking' ? '#F59E0B' : aiState === 'speaking' ? '#10B981' : '#6B7280' }} />
+              <Text style={{ color: '#E5E7EB', fontSize: 13, fontWeight: '600' }}>
+                {aiState === 'listening' ? 'Listening...' : aiState === 'thinking' ? 'Thinking...' : aiState === 'speaking' ? 'Speaking...' : 'Ready · Click to Record'}
+              </Text>
+            </View>
 
-          {/* Center Content */}
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-            <View style={styles.orbContainer}>
-              <AnimatedPulseRing size={112} color="#4777c2" delay={0} active={aiState === 'listening'} />
-              <AnimatedPulseRing size={112} color="#4777c2" delay={600} active={aiState === 'listening'} />
-              <AnimatedPulseRing size={112} color="#4777c2" delay={1200} active={aiState === 'listening'} />
+            <TouchableOpacity
+              style={styles.voiceTopBtn}
+              onPress={() => {
+                handleStopAll();
+                setIsVoiceMode(false);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Switch to text mode"
+            >
+              <MaterialIcons name="keyboard" size={22} color="#9CA3AF" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Live Text Readout of User Query and LLM Response */}
+          <View style={{ flex: 1, paddingHorizontal: 20, justifyContent: 'center' }}>
+            <ScrollView
+              style={{ maxHeight: 290 }}
+              contentContainerStyle={{ paddingVertical: 10 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {latestUserMessage && (
+                <View style={styles.voiceUserBubble}>
+                  <Text style={styles.voiceUserLabel}>You asked</Text>
+                  <Text style={styles.voiceUserText}>{latestUserMessage.text}</Text>
+                </View>
+              )}
+
+              {aiState === 'thinking' && (
+                <View style={styles.voiceAiBubble}>
+                  <Text style={styles.voiceAiLabel}>MEERUP Assistant</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                    <ActivityIndicator size="small" color="#F59E0B" />
+                    <Text style={{ color: '#9CA3AF', fontSize: 14, fontStyle: 'italic' }}>
+                      Thinking & generating guide...
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {latestAiMessage && aiState !== 'thinking' && (
+                <View style={styles.voiceAiBubble}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <Text style={styles.voiceAiLabel}>MEERUP Assistant</Text>
+                    {aiState === 'speaking' && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <MaterialIcons name="volume-up" size={14} color="#10B981" />
+                        <Text style={{ color: '#10B981', fontSize: 11, fontWeight: '700' }}>SPEAKING</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.voiceAiText}>{latestAiMessage.text}</Text>
+
+                  {latestAiMessage.places && latestAiMessage.places.length > 0 && (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                      {latestAiMessage.places.map(p => (
+                        <View key={p.name} style={styles.voicePlaceChip}>
+                          <MaterialIcons name="place" size={12} color="#34D399" />
+                          <Text style={styles.voicePlaceChipText}>{p.name}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {!latestUserMessage && !latestAiMessage && aiState === 'idle' && (
+                <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                  <MaterialIcons name="mic-none" size={44} color="#4B5563" style={{ marginBottom: 12 }} />
+                  <Text style={{ color: '#E5E7EB', fontSize: 16, fontWeight: '600', textAlign: 'center', marginBottom: 6 }}>
+                    English Voice Assistant
+                  </Text>
+                  <Text style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center', lineHeight: 18, maxWidth: 280 }}>
+                    Click "Record" below when you want to speak. Responses will be spoken aloud and shown in text here.
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+
+          {/* Center Orb & Action Controls */}
+          <View style={{ alignItems: 'center', paddingBottom: Math.max(insets.bottom, 20) + 12 }}>
+            <View style={[styles.orbContainer, { marginBottom: 16 }]}>
+              <AnimatedPulseRing size={112} color={aiState === 'speaking' ? '#10B981' : '#4777c2'} delay={0} active={aiState === 'listening' || aiState === 'speaking'} />
+              <AnimatedPulseRing size={112} color={aiState === 'speaking' ? '#10B981' : '#4777c2'} delay={600} active={aiState === 'listening' || aiState === 'speaking'} />
               <TouchableOpacity
                 onPress={toggleListening}
                 style={[
                   styles.orbOuter,
-                  aiState === 'idle' && { borderColor: '#E5E7EB', opacity: 0.5 },
-                  aiState === 'listening' && { borderColor: '#4777c2' },
+                  aiState === 'idle' && { borderColor: '#E5E7EB', opacity: 0.6 },
+                  aiState === 'listening' && { borderColor: '#3B82F6' },
                   aiState === 'thinking' && { borderColor: '#D97706' },
-                  aiState === 'speaking' && { borderColor: '#047857' },
+                  aiState === 'speaking' && { borderColor: '#10B981' },
                 ]}
               >
                 <View style={[
                   styles.orbInner,
-                  aiState === 'idle' && { borderColor: '#E5E7EB' },
-                  aiState === 'listening' && { borderColor: '#4777c2' },
-                  aiState === 'thinking' && { borderColor: '#D97706' },
-                  aiState === 'speaking' && { borderColor: '#047857' },
+                  aiState === 'idle' && { borderColor: '#4B5563', backgroundColor: '#111827' },
+                  aiState === 'listening' && { borderColor: '#3B82F6', backgroundColor: '#1E3A8A' },
+                  aiState === 'thinking' && { borderColor: '#D97706', backgroundColor: '#78350F' },
+                  aiState === 'speaking' && { borderColor: '#10B981', backgroundColor: '#064E3B' },
                 ]}>
                   <MaterialIcons
-                    name="mic"
-                    size={24}
+                    name={
+                      aiState === 'listening' ? 'stop' :
+                      aiState === 'speaking' ? 'stop' :
+                      aiState === 'thinking' ? 'hourglass-empty' :
+                      'mic'
+                    }
+                    size={28}
                     color={
-                      aiState === 'listening' ? '#4777c2' :
-                        aiState === 'thinking' ? '#D97706' :
-                          aiState === 'speaking' ? '#047857' :
-                            '#9CA3AF'
+                      aiState === 'listening' ? '#93C5FD' :
+                      aiState === 'thinking' ? '#FCD34D' :
+                      aiState === 'speaking' ? '#6EE7B7' :
+                      '#FFFFFF'
                     }
                     style={{ marginBottom: 2 }}
                   />
                   <Text style={[
                     styles.orbText,
-                    aiState === 'idle' && { color: '#9CA3AF' },
-                    aiState === 'listening' && { color: '#4777c2' },
-                    aiState === 'thinking' && { color: '#D97706' },
-                    aiState === 'speaking' && { color: '#047857' },
+                    { color: '#FFFFFF', fontSize: 11, fontWeight: '700', textTransform: 'uppercase' }
                   ]}>
-                    {aiState === 'idle' ? 'MEERUP' : aiState.charAt(0).toUpperCase() + aiState.slice(1)}
+                    {aiState === 'listening' ? 'Stop' : aiState === 'speaking' ? 'Stop' : aiState === 'thinking' ? 'Thinking' : 'Record'}
                   </Text>
                 </View>
               </TouchableOpacity>
             </View>
 
-          </View>
+            {/* Prominent Action Controls: Stop Button / Record Button */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              {aiState === 'listening' && (
+                <TouchableOpacity
+                  style={styles.voiceStopBtn}
+                  onPress={() => {
+                    if (recording) stopRecordingAndThink(recording);
+                    else handleStopAll();
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Stop recording and get answer"
+                >
+                  <MaterialIcons name="stop-circle" size={22} color="#FFFFFF" />
+                  <Text style={styles.voiceStopBtnText}>Stop & Get Answer</Text>
+                </TouchableOpacity>
+              )}
 
-          {/* Footer */}
-          <View style={[styles.bottomInputContainer, { paddingBottom: Math.max(insets.bottom, 10), backgroundColor: 'transparent' }]}>
-            <View style={[styles.inputRow, { justifyContent: 'space-between' }]}>
-              {/* Left: Mic Disable */}
-              <TouchableOpacity style={[styles.sendBtn, { backgroundColor: '#1F2937', borderColor: '#374151' }]} onPress={toggleMute}>
-                <MaterialIcons name={!isMicMuted ? "mic" : "mic-off"} size={20} color={!isMicMuted ? "#9CA3AF" : "#EF4444"} />
-              </TouchableOpacity>
+              {aiState === 'speaking' && (
+                <TouchableOpacity
+                  style={styles.voiceStopBtn}
+                  onPress={handleStopAll}
+                  accessibilityRole="button"
+                  accessibilityLabel="Stop voice playback"
+                >
+                  <MaterialIcons name="stop-circle" size={22} color="#FFFFFF" />
+                  <Text style={styles.voiceStopBtnText}>Stop Voice</Text>
+                </TouchableOpacity>
+              )}
 
-              {/* Center: English Voice Assistant Indicator */}
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingVertical: 8,
-                  paddingHorizontal: 16,
-                  backgroundColor: '#1F2937',
-                  borderRadius: 24,
-                  borderWidth: 1,
-                  borderColor: '#374151',
-                }}
-              >
-                <MaterialIcons name="record-voice-over" size={16} color="#10B981" style={{ marginRight: 6 }} />
-                <Text style={{ color: '#E5E7EB', fontSize: 13, fontWeight: '600' }}>English Voice Assistant</Text>
-              </View>
+              {aiState === 'thinking' && (
+                <TouchableOpacity
+                  style={[styles.voiceStopBtn, { backgroundColor: '#4B5563' }]}
+                  onPress={handleStopAll}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel thinking"
+                >
+                  <MaterialIcons name="close" size={20} color="#FFFFFF" />
+                  <Text style={styles.voiceStopBtnText}>Cancel</Text>
+                </TouchableOpacity>
+              )}
 
-              {/* Right: Keyboard/Close */}
-              <TouchableOpacity style={[styles.sendBtn, { backgroundColor: '#1F2937', borderColor: '#374151' }]} onPress={() => setIsVoiceMode(false)}>
-                <MaterialIcons name="keyboard" size={20} color="#9CA3AF" />
-              </TouchableOpacity>
+              {aiState === 'idle' && (
+                <TouchableOpacity
+                  style={styles.voiceRecordBtn}
+                  onPress={startRecording}
+                  accessibilityRole="button"
+                  accessibilityLabel="Click to record voice"
+                >
+                  <MaterialIcons name="mic" size={22} color="#FFFFFF" />
+                  <Text style={styles.voiceRecordBtnText}>Click to Record</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
@@ -2498,5 +2675,113 @@ const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#047857',
+  },
+  voiceTopBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1F2937',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  voiceUserBubble: {
+    backgroundColor: 'rgba(31, 41, 55, 0.7)',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: '#3B82F6',
+  },
+  voiceUserLabel: {
+    fontSize: 11,
+    color: '#93C5FD',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  voiceUserText: {
+    fontSize: 14,
+    color: '#F3F4F6',
+    lineHeight: 20,
+  },
+  voiceAiBubble: {
+    backgroundColor: 'rgba(17, 24, 39, 0.88)',
+    borderRadius: 14,
+    padding: 14,
+    borderLeftWidth: 3,
+    borderLeftColor: '#10B981',
+    borderWidth: 1,
+    borderColor: '#1F2937',
+  },
+  voiceAiLabel: {
+    fontSize: 11,
+    color: '#34D399',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  voiceAiText: {
+    fontSize: 15,
+    color: '#F9FAFB',
+    lineHeight: 22,
+  },
+  voicePlaceChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(6, 78, 59, 0.6)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#059669',
+  },
+  voicePlaceChipText: {
+    fontSize: 11,
+    color: '#A7F3D0',
+    fontWeight: '600',
+  },
+  voiceStopBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#EF4444',
+    paddingVertical: 12,
+    paddingHorizontal: 22,
+    borderRadius: 28,
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  voiceStopBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  voiceRecordBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#047857',
+    paddingVertical: 12,
+    paddingHorizontal: 22,
+    borderRadius: 28,
+    shadowColor: '#047857',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  voiceRecordBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });

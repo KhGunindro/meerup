@@ -207,7 +207,7 @@ let AudioRuntime: typeof Audio | any;
 try {
   AudioRuntime = require('expo-av').Audio;
 } catch (e) {
-  console.warn("expo-av native module not found. Audio features will be disabled.");
+  console.info("expo-av native module not found. Audio features will be disabled.");
 }
 import { Colors } from '@/constants/theme';
 

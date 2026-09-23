@@ -6,6 +6,8 @@
     "@expo/ui": "~57.0.19",
     "@expo/vector-icons": "^15.0.2",
     "expo": "~57.0.24",
+    "expo-audio": "~57.0.5",
+    "expo-av": "^16.0.8",
     "expo-camera": "~57.0.5",
     "expo-constants": "~57.0.19",
     "expo-device": "~57.0.2",
@@ -43,6 +45,15 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "expo-av"
+        ]
+      }
+    }
   },
   "private": true
 }

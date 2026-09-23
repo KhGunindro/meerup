@@ -16,6 +16,7 @@ import { Colors, MaxContentWidth } from '@/constants/theme';
 import { getDestImg } from '@/constants/images';
 import { DESTINATIONS } from '@/constants/destinations';
 import { useLocation } from '@/hooks/use-location';
+import { MeeteilonTranslator } from '@/components/MeeteilonTranslator';
 
 const HOME_CARDS = DESTINATIONS.slice(0, 3);
 
@@ -145,6 +146,9 @@ export default function HomeScreen() {
           ))}
         </View>
       </View>
+
+      {/* ── LIVE TRANSLATION (MEETEILON / MANIPURI) ── */}
+      <MeeteilonTranslator />
 
       {/* ── EXPLORE MANIPUR ──────────────────────── */}
       <View style={styles.section}>

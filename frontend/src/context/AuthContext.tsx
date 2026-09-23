@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, UserProfile } from '@/utils/supabase';
+import { API_BASE_URL } from '@/utils/meerupApi';
 
 interface AuthContextType {
   user: User | null;
@@ -9,6 +10,7 @@ interface AuthContextType {
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null; data?: any }>;
+  verifyOtp: (email: string, token: string) => Promise<{ error: Error | null; data?: any }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: Error | null }>;
   refreshProfile: () => Promise<void>;
@@ -21,6 +23,7 @@ const AuthContext = createContext<AuthContextType>({
   isLoading: true,
   signIn: async () => ({ error: null }),
   signUp: async () => ({ error: null }),
+  verifyOtp: async () => ({ error: null }),
   signOut: async () => {},
   resetPassword: async () => ({ error: null }),
   refreshProfile: async () => {},
@@ -96,6 +99,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         email: email.trim(),
         password,
         options: {
+          emailRedirectTo: `${API_BASE_URL}/auth/confirm`,
           data: {
             full_name: fullName.trim(),
           },
@@ -119,6 +123,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return { error: null, data };
     } catch (err: any) {
       return { error: err || new Error('Sign up failed') };
+    }
+  };
+
+  const verifyOtp = async (email: string, token: string) => {
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token: token.trim(),
+        type: 'signup',
+      });
+
+      if (error) {
+        return { error: new Error(error.message) };
+      }
+
+      if (data.session) {
+        setSession(data.session);
+        setUser(data.session.user);
+        await fetchProfile(data.session.user.id);
+      }
+
+      return { error: null, data };
+    } catch (err: any) {
+      return { error: err || new Error('Verification failed') };
     }
   };
 
@@ -159,6 +187,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isLoading,
         signIn,
         signUp,
+        verifyOtp,
         signOut,
         resetPassword,
         refreshProfile,

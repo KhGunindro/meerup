@@ -9,6 +9,7 @@ import {
   Alert,
   useColorScheme,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -125,11 +126,15 @@ export default function ProfileScreen() {
         {!user && (
           <View style={styles.loggedOutCard}>
             <View style={[styles.heroIconBg, { backgroundColor: isDark ? '#1F2937' : '#EFF6FF' }]}>
-              <MaterialIcons name="travel-explore" size={48} color="#4777c2" />
+              <Image
+                source={require('@/assets/images/logo.png')}
+                style={styles.heroLogoImage}
+                resizeMode="contain"
+              />
             </View>
             <Text style={[styles.loggedOutTitle, { color: colors.text }]}>Welcome to MEERUP</Text>
             <Text style={[styles.loggedOutSubtitle, { color: colors.textSecondary }]}>
-              Sign in or create an account to save your routes in Swiggy-style map navigation, track trips, and personalize your journey through Manipur.
+              Sign in or create an account to save your routes, map navigation, track trips, and personalize your journey through Manipur.
             </Text>
 
             <View style={styles.btnRow}>
@@ -154,7 +159,7 @@ export default function ProfileScreen() {
             </View>
 
             {/* Feature highlights */}
-            <View style={[styles.featuresBox, { backgroundColor: isDark ? '#111827' : '#F9FAFB', borderColor: colors.border }]}>
+            {/* <View style={[styles.featuresBox, { backgroundColor: isDark ? '#111827' : '#F9FAFB', borderColor: colors.border }]}>
               <View style={styles.featureItem}>
                 <MaterialIcons name="map" size={20} color="#4777c2" />
                 <View style={styles.featureTexts}>
@@ -176,7 +181,7 @@ export default function ProfileScreen() {
                   <Text style={[styles.featureDesc, { color: colors.textSecondary }]}>Instant camera identification of Kangla and Ima Keithel</Text>
                 </View>
               </View>
-            </View>
+            </View> */}
           </View>
         )}
 
@@ -193,9 +198,12 @@ export default function ProfileScreen() {
               <View style={styles.avatarRow}>
                 <View style={styles.avatarCircle}>
                   <Text style={styles.avatarText}>
-                    {profile?.full_name
-                      ? profile.full_name.charAt(0).toUpperCase()
-                      : user.email?.charAt(0).toUpperCase() || 'M'}
+                    {(
+                      profile?.full_name?.trim() ||
+                      user.user_metadata?.full_name?.trim() ||
+                      user.email?.split('@')[0]?.trim() ||
+                      'M'
+                    ).charAt(0).toUpperCase()}
                   </Text>
                 </View>
                 <View style={styles.userInfo}>
@@ -383,6 +391,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+    overflow: 'hidden',
+  },
+  heroLogoImage: {
+    width: 62,
+    height: 62,
   },
   loggedOutTitle: {
     fontSize: 24,

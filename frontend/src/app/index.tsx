@@ -265,14 +265,14 @@ export default function HomeScreen() {
             desc: "Manipur's flagship celebration of classical Raas Leela, martial arts (Thang-Ta), indigenous water sports, and culinary rituals.",
             cta: 'RSVP Itinerary',
           },
-          {
-            id: 'sangai-festival',
-            imgId: 'thabal',
-            tag: 'Mar 16-22 · Imphal Valley',
-            name: 'Yaoshang Thabal Chongba',
-            desc: 'Traditional moonlit circle dance uniting valley youth under lantern-lit bamboo groves with live percussion.',
-            cta: 'Learn More',
-          },
+          // {
+          //   id: 'sangai-festival',
+          //   imgId: 'thabal',
+          //   tag: 'Mar 16-22 · Imphal Valley',
+          //   name: 'Yaoshang Thabal Chongba',
+          //   desc: 'Traditional moonlit circle dance uniting valley youth under lantern-lit bamboo groves with live percussion.',
+          //   cta: 'Learn More',
+          // },
         ].map((event) => (
           <TouchableOpacity
             key={event.name}

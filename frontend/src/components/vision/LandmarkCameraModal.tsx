@@ -299,7 +299,7 @@ export function LandmarkCameraModal({
           {/* AR Mode Indicator Badge */}
           <View style={styles.arModeBadge}>
             <View style={styles.radarPulseDot} />
-            <Text style={styles.arModeText}>EXPO AR • LANDMARK VISION</Text>
+            <Text style={styles.arModeText}>LANDMARK VISION</Text>
           </View>
 
           {/* Camera Flip / Web Upload Button */}

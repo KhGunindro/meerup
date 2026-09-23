@@ -14,12 +14,21 @@ import { router } from 'expo-router';
 import { Colors, MaxContentWidth } from '@/constants/theme';
 
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@/context/AuthContext';
 
 export function TopNavBar() {
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const isDark = scheme === 'dark';
+  const { user, profile } = useAuth();
+
+  const rawName =
+    profile?.full_name?.trim() ||
+    user?.user_metadata?.full_name?.trim() ||
+    user?.email?.split('@')[0]?.trim() ||
+    '';
+  const firstChar = rawName ? rawName.charAt(0).toUpperCase() : (user ? 'E' : 'M');
 
   const topPadding = Platform.OS === 'web' ? 14 : Math.max(insets.top, 12) + 6;
 
@@ -38,9 +47,9 @@ export function TopNavBar() {
         <View style={styles.brandRow}>
           <View style={[styles.logoBadge, { borderColor: colors.border }]}>
             <Image
-              source={require('@/assets/images/meerup-emblem.jpg')}
+              source={require('@/assets/images/logo.png')}
               style={styles.logoImage}
-              resizeMode="cover"
+              resizeMode="contain"
             />
           </View>
           <View style={styles.titleColumn}>
@@ -77,12 +86,28 @@ export function TopNavBar() {
             ]}
             accessibilityLabel="Open user profile"
             accessibilityRole="button">
-            <View style={[styles.avatarRing, { borderColor: colors.border }]}>
-              <Image
-                source={require('@/assets/images/explorer-avatar.jpg')}
-                style={styles.avatarImage}
-                resizeMode="cover"
-              />
+            <View
+              style={[
+                styles.avatarRing,
+                user
+                  ? {
+                      backgroundColor: '#047857',
+                      borderColor: isDark ? '#05966980' : '#A7F3D0',
+                    }
+                  : {
+                      backgroundColor: isDark ? '#1F2937' : '#E5E7EB',
+                      borderColor: colors.border,
+                    },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.avatarInitial,
+                  { color: user ? '#FFFFFF' : colors.textSecondary },
+                ]}
+              >
+                {firstChar}
+              </Text>
             </View>
           </Pressable>
         </View>
@@ -113,17 +138,13 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   logoBadge: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     overflow: 'hidden',
-    borderWidth: 1,
-    backgroundColor: '#05070B',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 2,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    padding: 2,
   },
   logoImage: {
     width: '100%',
@@ -153,16 +174,19 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1.5,
     overflow: 'hidden',
-    backgroundColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
   },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
+  avatarInitial: {
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   rightActions: {
     flexDirection: 'row',

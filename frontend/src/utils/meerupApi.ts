@@ -13,7 +13,12 @@ const getHost = (): string => {
 
 const HOST = getHost();
 
-export const TRANSLATION_API_BASE_URL = `http://${HOST}:8000`;
+export const NGROK_TRANSLATION_URL = 'https://nonexterminative-lucinda-gentlemanlike.ngrok-free.dev';
+
+// Live ngrok tunnel for Translation & Speech-to-Speech
+export const TRANSLATION_API_BASE_URL =
+  process.env.EXPO_PUBLIC_TRANSLATION_URL || NGROK_TRANSLATION_URL;
+
 export const BACKEND_API_BASE_URL = `http://${HOST}:8001`;
 
 // ─── Backend URL Configuration ────────────────────────────────────────────────
@@ -136,6 +141,7 @@ export const translateText = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
       },
       body: JSON.stringify({
         text,
@@ -212,6 +218,7 @@ export const speechToSpeechJson = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
       },
       body: JSON.stringify({
         audio_base64: cleanBase64,
@@ -283,6 +290,9 @@ export const speechToSpeech = async (
 
     const response = await fetch(`${TRANSLATION_API_BASE_URL}/api/sts`, {
       method: 'POST',
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+      },
       body: formData,
     });
 
@@ -321,6 +331,9 @@ export const transcribeAudio = async (
 
     const response = await fetch(`${TRANSLATION_API_BASE_URL}/api/transcribe`, {
       method: 'POST',
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+      },
       body: formData,
     });
 
@@ -437,6 +450,9 @@ export const checkTranslationEngineHealth = async (): Promise<boolean> => {
   try {
     const response = await fetch(`${TRANSLATION_API_BASE_URL}/api/health`, {
       method: 'GET',
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+      },
     });
     return response.ok;
   } catch {

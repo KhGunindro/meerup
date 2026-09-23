@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import * as SplashScreen from 'expo-splash-screen';
-import { useState } from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
+import { useState, useEffect } from 'react';
+import { Dimensions, StyleSheet, View, Platform } from 'react-native';
 import Animated, { Easing, Keyframe, runOnJS } from 'react-native-reanimated';
 
 const INITIAL_SCALE_FACTOR = Dimensions.get('screen').height / 90;
@@ -9,9 +9,21 @@ const DURATION = 600;
 
 export function AnimatedSplashOverlay() {
   const [animate, setAnimate] = useState(false);
-  const [visible, setVisible] = useState(true);
+  const [visible, setVisible] = useState(Platform.OS !== 'web');
 
-  if (!visible) return null;
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      SplashScreen.hideAsync().catch(() => {});
+      return;
+    }
+    const timer = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {});
+      setVisible(false);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (Platform.OS === 'web' || !visible) return null;
 
   const splashKeyframe = new Keyframe({
     0: {

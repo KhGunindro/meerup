@@ -35,15 +35,21 @@ export const NGROK_HEADERS: Record<string, string> = {
   'ngrok-skip-browser-warning': 'true',
 };
 
-// Unified Backend (FastAPI on Port 8001 + Proxied Translation on Port 8000)
+const isLocalWeb =
+  typeof window !== 'undefined' &&
+  (window.location?.hostname === 'localhost' || window.location?.hostname === '127.0.0.1');
+
+// Unified Backend (FastAPI on Port 8000 + Proxied Translation on Port 8000)
 export const BACKEND_API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || NGROK_PUBLIC_URL;
+  process.env.EXPO_PUBLIC_API_URL ||
+  (isLocalWeb ? 'http://localhost:8000' : NGROK_PUBLIC_URL);
 
 export const API_BASE_URL = BACKEND_API_BASE_URL;
 
 // Translation & Speech-to-Speech API
 export const TRANSLATION_API_BASE_URL =
-  process.env.EXPO_PUBLIC_TRANSLATION_URL || NGROK_PUBLIC_URL;
+  process.env.EXPO_PUBLIC_TRANSLATION_URL ||
+  (isLocalWeb ? 'http://localhost:8000' : NGROK_PUBLIC_URL);
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 export interface ApiResponse {
@@ -597,26 +603,49 @@ export const askGroundedChat = async (
   availableMinutes?: number,
   history?: Array<{ role: string; content: string }>
 ): Promise<GroundedChatResponse> => {
-  const url = `${API_BASE_URL}/api/chat/grounded`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...NGROK_HEADERS,
-    },
-    body: JSON.stringify({
-      message,
-      latitude,
-      longitude,
-      available_minutes: availableMinutes,
-      history,
-    }),
-  });
+  const candidateUrls = [
+    `${API_BASE_URL}/api/chat/grounded`,
+    'http://localhost:8000/api/chat/grounded',
+    `http://${HOST}:8000/api/chat/grounded`,
+    `${NGROK_PUBLIC_URL}/api/chat/grounded`,
+  ];
+  const uniqueUrls = Array.from(new Set(candidateUrls));
 
-  if (!response.ok) {
-    throw new Error(`Grounded Chat API error (${response.status})`);
+  for (const url of uniqueUrls) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...NGROK_HEADERS,
+        },
+        body: JSON.stringify({
+          message,
+          latitude,
+          longitude,
+          available_minutes: availableMinutes,
+          history,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.text) {
+          return data;
+        }
+      }
+    } catch {
+      // Continue to next candidate
+    }
   }
-  return await response.json();
+
+  throw new Error('All Grounded Chat endpoints were unreachable');
 };
 
 export interface AudioGuideTranscriptResult {

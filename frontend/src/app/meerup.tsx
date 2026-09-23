@@ -130,14 +130,19 @@ async function askLLM(
   ];
 
   const candidateUrls = [
+    'http://localhost:8080/v1/chat/completions',
+    'http://localhost:8000/v1/chat/completions',
     `${LLM_BASE_URL}/v1/chat/completions`,
     `${LLM_BASE_URL}/chat/completions`,
-    'http://localhost:8080/v1/chat/completions',
     'http://10.0.2.2:8080/v1/chat/completions',
+    'http://10.0.2.2:8000/v1/chat/completions',
   ];
 
   for (const url of candidateUrls) {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+
       const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -152,7 +157,10 @@ async function askLLM(
           stream: false,
           enable_thinking: false,
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
+
       if (res.ok) {
         const data = await res.json();
         const content = data.choices?.[0]?.message?.content?.trim();

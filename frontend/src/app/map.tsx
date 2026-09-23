@@ -24,7 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import Constants from 'expo-constants';
 import { WebView } from 'react-native-webview';
-import MapView, { Marker, Polyline, UrlTile, PROVIDER_DEFAULT } from 'react-native-maps';
+import { NativeMapView } from '@/components/map/NativeMapView';
 
 // react-native-maps requires native code — it only works in a dev build or production build,
 // NOT in Expo Go. Fall back to WebView/Leaflet when running inside Expo Go.
@@ -148,7 +148,7 @@ export default function MapScreen() {
   const [isSavingTrip, setIsSavingTrip] = useState(false);
   const [tripSaved, setTripSaved] = useState(false);
   const webViewRef = useRef<WebView>(null);
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<any>(null);
 
   // Listen to incoming route params
   useEffect(() => {
@@ -575,56 +575,20 @@ export default function MapScreen() {
           />
         ) : (
           // ── DEV BUILD / PRODUCTION: native MapView with CARTO tile overlay
-          <MapView
-            ref={mapRef}
+          <NativeMapView
+            mapRef={mapRef}
             style={styles.webView}
-            provider={PROVIDER_DEFAULT}
-            mapType="none"
-            initialRegion={{
-              latitude: userLocation.lat,
-              longitude: userLocation.lng,
-              latitudeDelta: 0.1,
-              longitudeDelta: 0.1,
-            }}
-          >
-            <UrlTile
-              urlTemplate={`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${process.env.EXPO_PUBLIC_CARTO_API_KEY || 'cb1_3uls_1_7874b4335173e85877f26ebd'}`}
-              maximumZ={19}
-              flipY={false}
-            />
-            {/* Glow Polyline */}
-            <Polyline
-              coordinates={nativeRouteCoords}
-              strokeColor="rgba(71, 119, 194, 0.25)"
-              strokeWidth={12}
-              lineCap="round"
-              lineJoin="round"
-            />
-            {/* Main Polyline */}
-            <Polyline
-              coordinates={nativeRouteCoords}
-              strokeColor="#4777c2"
-              strokeWidth={5}
-              lineCap="round"
-              lineJoin="round"
-            />
-            {/* User Marker */}
-            <Marker coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }} anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={styles.userPulseContainer}>
-                <View style={styles.userPulseRing} />
-                <View style={styles.userPulseDot} />
-              </View>
-            </Marker>
-            {/* Destination Marker */}
-            <Marker coordinate={{ latitude: selectedDest.lat, longitude: selectedDest.lng }} anchor={{ x: 0.5, y: 1.0 }}>
-              <View style={styles.destPinBox}>
-                <Text style={styles.destLabelTag}>{selectedDest.name}</Text>
-                <View style={styles.destPinHead}>
-                  <Text style={styles.destPinIcon}>★</Text>
-                </View>
-              </View>
-            </Marker>
-          </MapView>
+            userLocation={userLocation}
+            selectedDest={selectedDest}
+            nativeRouteCoords={nativeRouteCoords}
+            userPulseContainerStyle={styles.userPulseContainer}
+            userPulseRingStyle={styles.userPulseRing}
+            userPulseDotStyle={styles.userPulseDot}
+            destPinBoxStyle={styles.destPinBox}
+            destLabelTagStyle={styles.destLabelTag}
+            destPinHeadStyle={styles.destPinHead}
+            destPinIconStyle={styles.destPinIcon}
+          />
         )}
       </View>
 

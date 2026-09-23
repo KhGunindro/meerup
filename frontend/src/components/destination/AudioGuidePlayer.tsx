@@ -6,8 +6,6 @@ import {
   TouchableOpacity,
   Platform,
   ActivityIndicator,
-  Animated,
-  Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -40,44 +38,13 @@ export function AudioGuidePlayer({
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
   const [autoTranscripts, setAutoTranscripts] = useState<Record<string, string>>({});
-  const [currentSec, setCurrentSec] = useState(0);
-  const [audioDurationSec, setAudioDurationSec] = useState<number | null>(null);
   const [selectedLang, setSelectedLang] = useState<'en' | 'mni'>('en');
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
 
   // Sound instance references
   const nativeSoundRef = useRef<any>(null);
   const webAudioRef = useRef<any>(null);
   // Cache base64 audio per language so repeat plays are instant
   const audioCacheRef = useRef<Record<string, string>>({});
-  const timerFallbackRef = useRef<any>(null);
-
-  // Soundwave animation pulse
-  const waveAnim = useRef(new Animated.Value(0.3)).current;
-
-  useEffect(() => {
-    if (isPlaying) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(waveAnim, {
-            toValue: 1,
-            duration: 500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: false,
-          }),
-          Animated.timing(waveAnim, {
-            toValue: 0.3,
-            duration: 500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: false,
-          }),
-        ])
-      ).start();
-    } else {
-      waveAnim.stopAnimation();
-      waveAnim.setValue(0.3);
-    }
-  }, [isPlaying]);
 
   // Fallback language object if offline
   const activeLangObj =
@@ -93,7 +60,7 @@ export function AudioGuidePlayer({
       const res = await fetchAutoAudioTranscript(
         guide.title,
         destinationName,
-        guide.narrator,
+        undefined,
         lang
       );
       if (res && res.transcript) {
@@ -118,8 +85,6 @@ export function AudioGuidePlayer({
     activeLangObj?.text ||
     `Welcome to ${guide.title}. Explore the sacred history, mythical lore, and timeless heritage of Manipur.`;
 
-  const totalSec = audioDurationSec || guide.durationSec || 60;
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -128,10 +93,6 @@ export function AudioGuidePlayer({
   }, []);
 
   const stopAllAudio = async () => {
-    if (timerFallbackRef.current) {
-      clearInterval(timerFallbackRef.current);
-      timerFallbackRef.current = null;
-    }
     if (webAudioRef.current) {
       try {
         webAudioRef.current.pause();
@@ -193,19 +154,9 @@ export function AudioGuidePlayer({
         if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as any).Audio) {
           const snd = new (window as any).Audio(`data:audio/wav;base64,${cleanB64}`);
           webAudioRef.current = snd;
-          snd.playbackRate = playbackSpeed;
-          snd.currentTime = currentSec;
-
-          snd.ontimeupdate = () => {
-            setCurrentSec(Math.floor(snd.currentTime));
-            if (snd.duration && isFinite(snd.duration)) {
-              setAudioDurationSec(Math.round(snd.duration));
-            }
-          };
 
           snd.onended = () => {
             setIsPlaying(false);
-            setCurrentSec(0);
           };
 
           await snd.play();
@@ -231,22 +182,10 @@ export function AudioGuidePlayer({
 
             const { sound } = await AudioRuntime.Sound.createAsync(
               { uri: tempUri },
-              {
-                shouldPlay: true,
-                positionMillis: currentSec * 1000,
-                rate: playbackSpeed,
-                shouldCorrectPitch: true,
-              },
+              { shouldPlay: true, shouldCorrectPitch: true },
               (status: any) => {
-                if (status.isLoaded) {
-                  if (status.durationMillis) {
-                    setAudioDurationSec(Math.round(status.durationMillis / 1000));
-                  }
-                  setCurrentSec(Math.round(status.positionMillis / 1000));
-                  if (status.didJustFinish) {
-                    setIsPlaying(false);
-                    setCurrentSec(0);
-                  }
+                if (status.isLoaded && status.didJustFinish) {
+                  setIsPlaying(false);
                 }
               }
             );
@@ -268,24 +207,12 @@ export function AudioGuidePlayer({
     if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(activeTranscript);
-      utterance.rate = playbackSpeed;
       utterance.lang = selectedLang === 'mni' ? 'hi-IN' : 'en-US';
       utterance.onend = () => {
         setIsPlaying(false);
-        setCurrentSec(0);
       };
       window.speechSynthesis.speak(utterance);
       setIsPlaying(true);
-
-      timerFallbackRef.current = setInterval(() => {
-        setCurrentSec((prev) => {
-          if (prev >= totalSec) {
-            pauseAudio();
-            return 0;
-          }
-          return prev + 1;
-        });
-      }, 1000 / playbackSpeed);
     }
 
     setIsLoadingAudio(false);
@@ -293,10 +220,6 @@ export function AudioGuidePlayer({
 
   const pauseAudio = async () => {
     setIsPlaying(false);
-    if (timerFallbackRef.current) {
-      clearInterval(timerFallbackRef.current);
-      timerFallbackRef.current = null;
-    }
     if (webAudioRef.current) {
       try {
         webAudioRef.current.pause();
@@ -320,81 +243,33 @@ export function AudioGuidePlayer({
     }
   };
 
-  const seekRelative = async (diff: number) => {
-    const newSec = Math.max(0, Math.min(totalSec, currentSec + diff));
-    setCurrentSec(newSec);
-    if (webAudioRef.current) {
-      try {
-        webAudioRef.current.currentTime = newSec;
-      } catch (e) {}
-    }
-    if (nativeSoundRef.current) {
-      try {
-        await nativeSoundRef.current.setPositionAsync(newSec * 1000);
-      } catch (e) {}
-    }
-  };
-
-  const cycleSpeed = async () => {
-    const speeds = [1.0, 1.25, 1.5];
-    const nextIdx = (speeds.indexOf(playbackSpeed) + 1) % speeds.length;
-    const nextSpeed = speeds[nextIdx];
-    setPlaybackSpeed(nextSpeed);
-
-    if (webAudioRef.current) {
-      try {
-        webAudioRef.current.playbackRate = nextSpeed;
-      } catch (e) {}
-    }
-    if (nativeSoundRef.current) {
-      try {
-        await nativeSoundRef.current.setRateAsync(nextSpeed, true);
-      } catch (e) {}
-    }
-  };
-
   const handleLangChange = async (langCode: 'en' | 'mni') => {
     if (langCode === selectedLang) return;
     await stopAllAudio();
     setIsPlaying(false);
-    setCurrentSec(0);
     setSelectedLang(langCode);
   };
 
   const handleRegenerate = async () => {
     await stopAllAudio();
     setIsPlaying(false);
-    setCurrentSec(0);
-    // Invalidate audio cache for this language
     delete audioCacheRef.current[selectedLang];
     await getOrFetchTranscript(selectedLang, true);
   };
 
-  const formatTime = (sec: number) => {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const progressPercent = Math.min(100, Math.max(0, (currentSec / totalSec) * 100));
-
-  // Visualizer soundwave bars (16 bars)
-  const barHeights = [14, 22, 10, 26, 32, 18, 28, 36, 24, 30, 16, 28, 34, 20, 24, 12];
-
-  // Theme palettes for premium aesthetics
+  // Theme palettes
   const cardBg = isDark ? '#111319' : '#FFFFFF';
   const cardBorder = isDark ? '#232733' : '#E2E8F0';
   const glassInner = isDark ? '#181B24' : '#F8FAFC';
   const accentTeal = '#0D9488';
-  const accentTealGlow = 'rgba(13, 148, 136, 0.15)';
 
   return (
     <View style={[styles.cardContainer, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-      {/* ── Top Header with AI Badge & Language Toggle ─────────────────────── */}
+      {/* ── Top Header with Tag & Language Toggle ──────────────────────────── */}
       <View style={styles.topHeader}>
         <View style={styles.aiBadge}>
           <View style={[styles.aiDot, { backgroundColor: isPlaying ? '#10B981' : accentTeal }]} />
-          <Text style={styles.aiBadgeText}>AI COMPANION</Text>
+          <Text style={styles.aiBadgeText}>AUDIO COMPANION</Text>
         </View>
 
         {/* Language Segmented Toggle */}
@@ -427,42 +302,26 @@ export function AudioGuidePlayer({
                 styles.langPillText,
                 { color: selectedLang === 'mni' ? '#FFFFFF' : (isDark ? '#94A3B8' : '#64748B') },
               ]}>
-              ꯃৈতৈꯂꯣꯟ
+              ꯃৈতৈꯂꯣꯟ (Manipuri)
             </Text>
           </TouchableOpacity>
         </View>
-
-        {/* Speed Pill */}
-        <TouchableOpacity
-          style={[styles.speedButton, { backgroundColor: glassInner, borderColor: cardBorder }]}
-          onPress={cycleSpeed}
-          activeOpacity={0.7}>
-          <Text style={[styles.speedButtonText, { color: isDark ? '#F1F5F9' : '#0F172A' }]}>
-            {playbackSpeed}x
-          </Text>
-        </TouchableOpacity>
       </View>
 
-      {/* ── Story Info ────────────────────────────────────────────────────────── */}
+      {/* ── Title (No Dr. Sanatombi Devi line) ───────────────────────────────── */}
       <View style={styles.titleSection}>
         <Text style={[styles.mainTitle, { color: isDark ? '#F8FAFC' : '#0F172A' }]} numberOfLines={2}>
           {guide.title}
         </Text>
-        <View style={styles.narratorRow}>
-          <Ionicons name="sparkles" size={13} color={accentTeal} />
-          <Text style={[styles.narratorLabel, { color: isDark ? '#94A3B8' : '#64748B' }]} numberOfLines={1}>
-            {guide.narrator || 'AI Cultural Storyteller · Manipur'}
-          </Text>
-        </View>
       </View>
 
-      {/* ── Auto-Generated Transcript Card (Prominent & Live) ────────────────── */}
+      {/* ── Auto-Generated Transcript Card ─────────────────────────────────── */}
       <View style={[styles.transcriptContainer, { backgroundColor: glassInner, borderColor: cardBorder }]}>
         <View style={styles.transcriptMetaRow}>
           <View style={styles.transcriptLiveTag}>
-            <Ionicons name="document-text" size={13} color={accentTeal} />
+            <Ionicons name="sparkles" size={13} color={accentTeal} />
             <Text style={styles.transcriptTagText}>
-              {selectedLang === 'mni' ? 'AI ꯃꯣꯗꯦꯜꯒꯤ ꯇ꯭ꯔꯥꯟꯁꯀ꯭ꯔꯤꯞ' : 'AI MODEL AUTO-TRANSCRIPT'}
+              {selectedLang === 'mni' ? 'AI ꯃꯣꯗꯦꯜ ꯇ꯭ꯔꯥꯟꯁꯀ꯭ꯔꯤꯞ' : 'AI MODEL TRANSCRIPT'}
             </Text>
           </View>
 
@@ -486,8 +345,8 @@ export function AudioGuidePlayer({
             <ActivityIndicator size="small" color={accentTeal} />
             <Text style={[styles.loaderText, { color: isDark ? '#94A3B8' : '#64748B' }]}>
               {selectedLang === 'mni'
-                ? 'AI ꯃꯣꯗꯦꯜꯅ ꯃꯅꯤꯄꯨꯔꯤ ꯋꯥꯔꯤ ꯊꯧꯔꯥꯡ ꯇꯧꯔꯤ...'
-                : 'Generating cultural narration with AI model...'}
+                ? 'AI ꯃꯣꯗꯦꯜꯅ ꯃꯅꯤꯄꯨꯔꯤ ꯋꯥꯔꯤ ꯁꯦꯝꯂꯤ...'
+                : 'Composing story transcript with AI model...'}
             </Text>
           </View>
         ) : (
@@ -505,92 +364,41 @@ export function AudioGuidePlayer({
         )}
       </View>
 
-      {/* ── Dynamic Audio Soundwave Rhythm Bars ─────────────────────────────── */}
-      <View style={styles.soundwaveRow}>
-        {barHeights.map((h, i) => {
-          const isPassed = (i / barHeights.length) * 100 <= progressPercent;
-          return (
-            <Animated.View
-              key={i}
-              style={[
-                styles.soundBar,
-                {
-                  height: isPlaying ? h * (0.5 + ((i % 4) * 0.18)) : 6,
-                  backgroundColor: isPassed
-                    ? accentTeal
-                    : isDark
-                    ? '#2A303C'
-                    : '#CBD5E1',
-                  opacity: isPlaying ? waveAnim : 0.6,
-                },
-              ]}
-            />
-          );
-        })}
-      </View>
-
-      {/* ── Progress Track & Timestamps ─────────────────────────────────────── */}
-      <View style={styles.progressSection}>
-        <View style={[styles.trackBg, { backgroundColor: isDark ? '#232834' : '#E2E8F0' }]}>
-          <View
-            style={[
-              styles.trackActive,
-              { width: `${progressPercent}%`, backgroundColor: accentTeal },
-            ]}
-          />
-        </View>
-
-        <View style={styles.timeInfoRow}>
-          <Text style={[styles.timeLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-            {formatTime(currentSec)}
-          </Text>
-          <Text style={[styles.timeLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>
-            {formatTime(totalSec)}
-          </Text>
-        </View>
-      </View>
-
-      {/* ── Player Controls Row (-15s, Play/Pause, +15s) ────────────────────── */}
-      <View style={styles.controlsBar}>
-        {/* Rewind -15s */}
-        <TouchableOpacity
-          style={[styles.seekCircle, { backgroundColor: glassInner, borderColor: cardBorder }]}
-          onPress={() => seekRelative(-15)}
-          activeOpacity={0.7}
-          accessibilityLabel="Rewind 15 seconds">
-          <Ionicons name="play-back" size={19} color={isDark ? '#E2E8F0' : '#1E293B'} />
-          <Text style={[styles.seekLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>-15s</Text>
-        </TouchableOpacity>
-
-        {/* Center Main Play / Pause Button with Neural Glow */}
-        <TouchableOpacity
-          style={[styles.masterPlayBtn, { backgroundColor: accentTeal }]}
-          onPress={togglePlay}
-          disabled={isLoadingAudio}
-          activeOpacity={0.85}
-          accessibilityLabel={isPlaying ? 'Pause Narration' : 'Play AI Voice Narration'}>
-          {isLoadingAudio ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
+      {/* ── Only Play Button (No Scrubber, No Bars, No Speed, No -15s/+15s) ─── */}
+      <TouchableOpacity
+        style={[
+          styles.masterPlayBtn,
+          {
+            backgroundColor: isPlaying ? (isDark ? '#1E293B' : '#F1F5F9') : accentTeal,
+            borderColor: isPlaying ? accentTeal : 'transparent',
+          },
+        ]}
+        onPress={togglePlay}
+        disabled={isLoadingAudio}
+        activeOpacity={0.85}
+        accessibilityLabel={isPlaying ? 'Pause Narration' : 'Play Narration'}>
+        {isLoadingAudio ? (
+          <View style={styles.playBtnInner}>
+            <ActivityIndicator size="small" color={isPlaying ? accentTeal : '#FFFFFF'} />
+            <Text style={[styles.playBtnText, { color: isPlaying ? accentTeal : '#FFFFFF' }]}>
+              {selectedLang === 'mni' ? 'ꯈꯣꯟꯊꯣꯛ ꯁꯦꯝꯂꯤ...' : 'Generating Voice...'}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.playBtnInner}>
             <Ionicons
-              name={isPlaying ? 'pause' : 'play'}
-              size={26}
-              color="#FFFFFF"
-              style={{ marginLeft: isPlaying ? 0 : 2 }}
+              name={isPlaying ? 'pause-circle' : 'play-circle'}
+              size={24}
+              color={isPlaying ? accentTeal : '#FFFFFF'}
             />
-          )}
-        </TouchableOpacity>
-
-        {/* Forward +15s */}
-        <TouchableOpacity
-          style={[styles.seekCircle, { backgroundColor: glassInner, borderColor: cardBorder }]}
-          onPress={() => seekRelative(15)}
-          activeOpacity={0.7}
-          accessibilityLabel="Forward 15 seconds">
-          <Ionicons name="play-forward" size={19} color={isDark ? '#E2E8F0' : '#1E293B'} />
-          <Text style={[styles.seekLabel, { color: isDark ? '#94A3B8' : '#64748B' }]}>+15s</Text>
-        </TouchableOpacity>
-      </View>
+            <Text style={[styles.playBtnText, { color: isPlaying ? accentTeal : '#FFFFFF' }]}>
+              {isPlaying
+                ? (selectedLang === 'mni' ? 'ꯂꯦꯞꯄꯨ (Pause)' : 'Pause Narration')
+                : (selectedLang === 'mni' ? 'ꯋꯥꯔꯤ ꯇꯥꯕꯤꯌꯨ (Play Story)' : 'Play Story Narration')}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
     </View>
   );
 }
@@ -599,14 +407,14 @@ const styles = StyleSheet.create({
   cardContainer: {
     marginHorizontal: 16,
     marginTop: 18,
-    borderRadius: 24,
+    borderRadius: 22,
     borderWidth: 1,
-    padding: 20,
-    elevation: 4,
-    shadowColor: '#0D9488',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
+    padding: 18,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
   },
   topHeader: {
     flexDirection: 'row',
@@ -643,47 +451,26 @@ const styles = StyleSheet.create({
   },
   langPill: {
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderRadius: 10,
   },
   langPillText: {
     fontSize: 11,
     fontWeight: '700',
   },
-  speedButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  speedButtonText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
   titleSection: {
     marginTop: 14,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   mainTitle: {
-    fontSize: 17,
+    fontSize: 16.5,
     fontWeight: '800',
     letterSpacing: -0.3,
-  },
-  narratorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 4,
-  },
-  narratorLabel: {
-    fontSize: 12,
-    fontWeight: '500',
   },
   transcriptContainer: {
     borderRadius: 16,
     borderWidth: 1,
     padding: 14,
-    marginTop: 4,
     marginBottom: 14,
   },
   transcriptMetaRow: {
@@ -729,71 +516,28 @@ const styles = StyleSheet.create({
   transcriptContentText: {
     fontStyle: 'italic',
   },
-  soundwaveRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    height: 36,
-    paddingHorizontal: 8,
-    marginBottom: 10,
-  },
-  soundBar: {
-    width: 3.5,
-    borderRadius: 2,
-  },
-  progressSection: {
-    marginBottom: 16,
-  },
-  trackBg: {
-    height: 5,
-    borderRadius: 3,
-    width: '100%',
-    overflow: 'hidden',
-  },
-  trackActive: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  timeInfoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 6,
-  },
-  timeLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  controlsBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 24,
-    paddingVertical: 4,
-  },
-  seekCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 1,
-  },
-  seekLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    marginTop: -2,
-  },
   masterPlayBtn: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 6,
+    elevation: 3,
     shadowColor: '#0D9488',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+  },
+  playBtnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  playBtnText: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 });

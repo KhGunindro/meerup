@@ -150,8 +150,8 @@ async def speech_to_speech(
         return {
             "success": True,
             "provider": result.get("provider", "AI4Bharat Local Indic Stack"),
-            "source_language": source_language,
-            "target_language": target_language,
+            "source_language": result.get("source_language", source_language),
+            "target_language": result.get("target_language", target_language),
             "recognized_text": result.get("recognized_text", ""),
             "translated_text": result.get("translated_text", ""),
             "audio_base64": audio_b64,
@@ -194,9 +194,9 @@ async def speech_to_speech_json(req: STSJsonRequest):
 
         return {
             "success": True,
-            "provider": "AI4Bharat IndicConformer",
-            "source_language": req.source_language,
-            "target_language": req.target_language,
+            "provider": result.get("provider", "AI4Bharat Indic Stack"),
+            "source_language": result.get("source_language", req.source_language),
+            "target_language": result.get("target_language", req.target_language),
             "recognized_text": result.get("recognized_text", ""),
             "translated_text": result.get("translated_text", ""),
             "audio_base64": audio_b64,

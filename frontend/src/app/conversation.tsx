@@ -4,7 +4,6 @@ import {
   Animated,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -20,16 +19,26 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Colors } from '@/constants/theme';
 import {
   translateText,
+  speechToSpeech,
   checkTranslationEngineHealth,
 } from '@/utils/meerupApi';
 
-// Safe expo-audio native import
+// Safe expo-audio imports
 let createAudioPlayer: any = null;
+let useAudioRecorder: any = null;
+let RecordingPresets: any = null;
+let requestRecordingPermissionsAsync: any = null;
+let setAudioModeAsync: any = null;
+
 try {
   const expoAudio = require('expo-audio');
   createAudioPlayer = expoAudio.createAudioPlayer;
-} catch {
-  // WebView audio fallback
+  useAudioRecorder = expoAudio.useAudioRecorder;
+  RecordingPresets = expoAudio.RecordingPresets;
+  requestRecordingPermissionsAsync = expoAudio.requestRecordingPermissionsAsync;
+  setAudioModeAsync = expoAudio.setAudioModeAsync;
+} catch (e) {
+  console.log('expo-audio native module notice:', e);
 }
 
 export default function ConversationScreen() {
@@ -39,32 +48,43 @@ export default function ConversationScreen() {
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const isDark = scheme === 'dark';
 
-  // Speech-to-Speech conversation results
-  const [sourceText, setSourceText] = useState('Where is Kangla Fort?');
-  const [sourceLang, setSourceLang] = useState<'en' | 'mni'>('en');
-  const [translatedText, setTranslatedText] = useState('ꯀꯡꯂꯥ ꯐꯣꯔꯠ ꯀꯗꯥꯏꯗ ꯂꯩꯕꯒꯦ?');
+  // Mode: 'auto' (Whisper LID Layer) | 'en' (English -> Manipuri) | 'mni' (Manipuri -> English)
+  const [speechMode, setSpeechMode] = useState<'auto' | 'en' | 'mni'>('auto');
+
+  // Live spoken & translated text (strictly empty initial state - no predefined text)
+  const [spokenText, setSpokenText] = useState('');
+  const [spokenLang, setSpokenLang] = useState<'en' | 'mni'>('en');
+  const [translatedText, setTranslatedText] = useState('');
   const [targetLang, setTargetLang] = useState<'en' | 'mni'>('mni');
   const [audioBase64, setAudioBase64] = useState<string | null>(null);
 
-  // Status and recording states
+  // States
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('Tap Mic to Speak (Auto-Detect)');
-  const [engineReady, setEngineReady] = useState<boolean | null>(null);
+  const [statusMessage, setStatusMessage] = useState('Tap Mic to Speak');
 
   // Bottom text input
   const [bottomInput, setBottomInput] = useState('');
 
-  // Animation for pulse effect on single mic
+  // Animation for pulse effect on mic
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   // Audio player WebView bridge
   const webViewRef = useRef<WebView>(null);
   const activeNativePlayerRef = useRef<any>(null);
 
+  // Native audio recorder instance (if available)
+  const recorder = useAudioRecorder && RecordingPresets ? useAudioRecorder(RecordingPresets.HIGH_QUALITY) : null;
+
   useEffect(() => {
-    checkEngine();
+    checkTranslationEngineHealth();
+    if (setAudioModeAsync) {
+      setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      }).catch((e: any) => console.log('Audio mode init:', e));
+    }
   }, []);
 
   useEffect(() => {
@@ -73,12 +93,12 @@ export default function ConversationScreen() {
         Animated.sequence([
           Animated.timing(pulseAnim, {
             toValue: 1.25,
-            duration: 600,
+            duration: 500,
             useNativeDriver: true,
           }),
           Animated.timing(pulseAnim, {
             toValue: 1,
-            duration: 600,
+            duration: 500,
             useNativeDriver: true,
           }),
         ])
@@ -88,26 +108,10 @@ export default function ConversationScreen() {
     }
   }, [isRecording]);
 
-  const checkEngine = async () => {
-    const ok = await checkTranslationEngineHealth();
-    setEngineReady(ok);
-    if (!ok) {
-      setStatusMessage('Connecting to Translation Engine (:8000)...');
-      setTimeout(async () => {
-        const retry = await checkTranslationEngineHealth();
-        setEngineReady(retry);
-        if (retry) setStatusMessage('Auto-Recognition Ready');
-      }, 2000);
-    } else {
-      setStatusMessage('Auto-Recognition Ready');
-    }
-  };
-
   /**
-   * Helper: Auto-detect language (Meetei Mayek script vs English)
+   * Auto-detect text script (Meetei Mayek script vs Latin/English)
    */
   const detectLanguage = (text: string): 'en' | 'mni' => {
-    // Unicode ranges for Meetei Mayek: \uABC0-\uABFF and \uAAE0-\uAAFF
     const hasMeetei = /[\uABC0-\uABFF\uAAE0-\uAAFF]/.test(text);
     return hasMeetei ? 'mni' : 'en';
   };
@@ -160,63 +164,140 @@ export default function ConversationScreen() {
   };
 
   /**
-   * Auto Process Text/Speech: Translates & IMMEDIATELY Plays the Sound
+   * Clear current translation state
    */
-  const processAndPlayTranslation = async (textToProcess: string) => {
-    const query = textToProcess.trim();
+  const handleClear = () => {
+    setSpokenText('');
+    setTranslatedText('');
+    setAudioBase64(null);
+    setStatusMessage('Tap Mic to Speak');
+  };
+
+  /**
+   * Auto-translate typed input:
+   * English -> Manipuri (and speaks Manipuri voice)
+   * Manipuri -> English (and speaks English voice)
+   */
+  const processAndTranslateText = async (inputText: string) => {
+    const query = inputText.trim();
     if (!query) return;
 
     setIsProcessing(true);
-    const detectedSrc = detectLanguage(query);
-    const autoTarget = detectedSrc === 'en' ? 'mni' : 'en';
+    const detectedSrc = speechMode === 'auto' ? detectLanguage(query) : speechMode;
+    const target = detectedSrc === 'en' ? 'mni' : 'en';
 
-    setSourceText(query);
-    setSourceLang(detectedSrc);
-    setTargetLang(autoTarget);
-
-    setStatusMessage(`Translating ${detectedSrc === 'en' ? 'English ➔ Manipuri' : 'Manipuri ➔ English'}...`);
+    setSpokenText(query);
+    setSpokenLang(detectedSrc);
+    setTargetLang(target);
+    setStatusMessage(detectedSrc === 'en' ? 'Translating to Manipuri...' : 'Translating to English...');
 
     try {
-      const res = await translateText(query, detectedSrc, autoTarget, true);
-      if (res.error) {
-        setStatusMessage(`Error: ${res.error}`);
-      } else if (res.text) {
+      const res = await translateText(query, detectedSrc, target, true);
+      if (res.text && res.text.trim()) {
         setTranslatedText(res.text);
         if (res.audioBase64) {
           setAudioBase64(res.audioBase64);
-          setStatusMessage('🔊 Playing voice automatically...');
+          setStatusMessage('🔊 Speaking...');
           await playAudio(res.audioBase64);
-          setStatusMessage('Translation & Speech Complete');
-        } else {
-          setStatusMessage('Translation Complete');
         }
+        setStatusMessage('Tap Mic to Speak');
+      } else {
+        setStatusMessage('Translation returned empty');
       }
     } catch (err: any) {
-      setStatusMessage(err.message || 'Translation failed');
+      setStatusMessage('Translation error');
     } finally {
       setIsProcessing(false);
     }
   };
 
   /**
-   * ONE CENTRAL MIC BUTTON:
-   * Tap to start speaking -> Finish -> Auto-recognize & auto-play sound!
+   * Live Speech-to-Speech Microphone Handler
+   * Records live microphone audio and translates speech in real-time.
    */
-  const handleSingleMicPress = () => {
+  const handleMicPress = async () => {
     if (isRecording) {
-      // Finished speaking: stop recording and process
+      // User finished speaking: stop recorder and translate
       setIsRecording(false);
-      processAndPlayTranslation(sourceText);
-    } else {
-      // Start listening
-      setIsRecording(true);
-      setStatusMessage('🎙️ Listening... Speak English or Manipuri');
+      setIsProcessing(true);
+      setStatusMessage('Recognizing language & translating...');
 
-      // Automatically finish speaking after 2 seconds and process
-      setTimeout(() => {
-        setIsRecording(false);
-        processAndPlayTranslation(sourceText);
-      }, 2000);
+      try {
+        if (recorder) {
+          await recorder.stop();
+          const uri = recorder.uri;
+
+          if (uri) {
+            const reqSrc = speechMode;
+            const reqTgt = speechMode === 'en' ? 'mni' : (speechMode === 'mni' ? 'en' : 'mni');
+
+            const res = await speechToSpeech(uri, reqSrc, reqTgt);
+
+            if (res.text && res.text.trim()) {
+              const recognized = res.originalText || '';
+              const translated = res.text;
+              const sLang = (res.sourceLanguage === 'mni' ? 'mni' : 'en') as 'en' | 'mni';
+              const tLang = (res.targetLanguage === 'en' ? 'en' : 'mni') as 'en' | 'mni';
+
+              setSpokenText(recognized);
+              setSpokenLang(sLang);
+              setTranslatedText(translated);
+              setTargetLang(tLang);
+
+              if (res.audioBase64) {
+                setAudioBase64(res.audioBase64);
+                setStatusMessage('🔊 Speaking...');
+                await playAudio(res.audioBase64);
+              }
+              setStatusMessage('Tap Mic to Speak');
+            } else {
+              setStatusMessage('No speech detected. Please speak clearly into the mic or type below.');
+              setTimeout(() => {
+                setStatusMessage('Tap Mic to Speak');
+              }, 4000);
+            }
+          } else {
+            setStatusMessage('No audio captured');
+          }
+        } else {
+          setStatusMessage('Microphone recorder not ready');
+        }
+      } catch (err: any) {
+        console.log('STS processing error:', err);
+        setStatusMessage('Speech recognition error');
+      } finally {
+        setIsProcessing(false);
+      }
+    } else {
+      // Start live recording
+      try {
+        if (requestRecordingPermissionsAsync) {
+          const { granted } = await requestRecordingPermissionsAsync();
+          if (!granted) {
+            setStatusMessage('Microphone permission required');
+            return;
+          }
+        }
+
+        if (setAudioModeAsync) {
+          await setAudioModeAsync({
+            allowsRecording: true,
+            playsInSilentMode: true,
+          });
+        }
+
+        if (recorder) {
+          await recorder.prepareToRecordAsync();
+          recorder.record();
+        }
+
+        setIsRecording(true);
+        setStatusMessage('🎙️ Listening... Tap when finished');
+      } catch (err: any) {
+        console.log('Failed to start recording:', err);
+        setIsRecording(true);
+        setStatusMessage('🎙️ Listening... Tap when finished');
+      }
     }
   };
 
@@ -227,7 +308,7 @@ export default function ConversationScreen() {
     if (!bottomInput.trim()) return;
     const text = bottomInput.trim();
     setBottomInput('');
-    processAndPlayTranslation(text);
+    processAndTranslateText(text);
   };
 
   const cardBg = isDark ? colors.backgroundElement : '#FFFFFF';
@@ -236,7 +317,7 @@ export default function ConversationScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      {/* Hidden audio webview for 100% audio playback */}
+      {/* Hidden audio webview for 100% audio playback fallback */}
       <View style={styles.hiddenWebView}>
         <WebView
           ref={webViewRef}
@@ -273,105 +354,120 @@ export default function ConversationScreen() {
           <View style={styles.headerTitleWrap}>
             <Text style={[styles.headerTitle, { color: colors.text }]}>Speech-to-Speech</Text>
             <Text style={[styles.headerSubTitle, { color: colors.textSecondary }]}>
-              Auto Recognize • English ⟷ Meeteilon (ꯃꯤꯇꯩꯂꯣꯟ)
-            </Text>
-          </View>
-
-          <View style={[styles.statusDotWrapper, { backgroundColor: engineReady ? '#ECFDF5' : '#FEF3C7' }]}>
-            <View style={[styles.statusDot, { backgroundColor: engineReady ? '#10B981' : '#F59E0B' }]} />
-            <Text style={[styles.statusDotText, { color: engineReady ? '#065F46' : '#92400E' }]}>
-              Auto Live
+              English (🇬🇧) ⟷ Manipuri (🇮🇳 ꯃꯤꯇꯩꯂꯣꯟ)
             </Text>
           </View>
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {/* ════════════════ ACTIVE TRANSLATION CARDS ════════════════ */}
-          {/* 1. Spoken / Source Card */}
-          <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
-            <View style={styles.cardHeader}>
-              <View style={styles.tagRow}>
-                <Text style={styles.flagEmoji}>{sourceLang === 'en' ? '🇬🇧' : '🇮🇳'}</Text>
-                <Text style={[styles.tagText, { color: colors.text }]}>
-                  {sourceLang === 'en' ? 'Spoken (English)' : 'Spoken (ꯃꯤꯇꯩꯂꯣꯟ)'}
+        {/* ════════════════ LANGUAGE MODE SELECTOR ════════════════ */}
+        <View style={styles.modeSelectorWrap}>
+          {[
+            { id: 'auto', label: '⚡ Auto-Detect (Whisper)' },
+            { id: 'en', label: '🇬🇧 English ➔ 🇮🇳 Manipuri' },
+            { id: 'mni', label: '🇮🇳 Manipuri ➔ 🇬🇧 English' },
+          ].map((item) => {
+            const isSelected = speechMode === item.id;
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={[
+                  styles.modePill,
+                  {
+                    backgroundColor: isSelected ? colors.primary : (isDark ? '#1E293B' : '#F1F5F9'),
+                    borderColor: isSelected ? colors.primary : borderColor,
+                  },
+                ]}
+                onPress={() => setSpeechMode(item.id as any)}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.modePillText,
+                    { color: isSelected ? '#FFFFFF' : colors.textSecondary },
+                  ]}
+                >
+                  {item.label}
                 </Text>
-              </View>
-            </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
-            <Text
-              style={[
-                styles.mainTextDisplay,
-                sourceLang === 'mni' && styles.manipuriText,
-                { color: colors.text },
-              ]}
-              selectable
-            >
-              {sourceText || 'Speak or type below...'}
-            </Text>
-          </View>
-
-          {/* Swap / Flow Indicator */}
-          <View style={styles.flowRow}>
-            <View style={[styles.flowLine, { backgroundColor: borderColor }]} />
-            <View style={[styles.flowIconCircle, { backgroundColor: cardBg, borderColor }]}>
-              <Ionicons name="arrow-down" size={16} color={colors.primary} />
-            </View>
-            <View style={[styles.flowLine, { backgroundColor: borderColor }]} />
-          </View>
-
-          {/* 2. Translated Result Card */}
-          <View style={[styles.card, styles.resultCard, { backgroundColor: cardBg, borderColor: colors.primary }]}>
-            <View style={styles.cardHeader}>
-              <View style={styles.tagRow}>
-                <Text style={styles.flagEmoji}>{targetLang === 'mni' ? '🇮🇳' : '🇬🇧'}</Text>
-                <Text style={[styles.tagText, { color: colors.primary, fontWeight: '800' }]}>
-                  {targetLang === 'mni' ? 'Translated (ꯃꯤꯇꯩ ꯃꯌꯦꯛ)' : 'Translated (English)'}
+        {/* ════════════════ MAIN CENTER STAGE ════════════════ */}
+        <View style={styles.centerStage}>
+          {/* Live Translation Text Result (Shows ONLY what was actively spoken or typed) */}
+          {translatedText ? (
+            <View style={styles.resultContainer}>
+              {spokenText ? (
+                <Text style={[styles.spokenSubtext, { color: colors.textSecondary }]}>
+                  {spokenLang === 'en' ? '🇬🇧 Spoke English: ' : '🇮🇳 Spoke Manipuri: '}
+                  {spokenText}
                 </Text>
-              </View>
+              ) : null}
 
-              {audioBase64 ? (
+              <Text
+                style={[
+                  styles.translatedMainText,
+                  targetLang === 'mni' && styles.manipuriText,
+                  { color: colors.text },
+                ]}
+                selectable
+              >
+                {translatedText}
+              </Text>
+
+              <View style={styles.actionRow}>
+                {audioBase64 ? (
+                  <TouchableOpacity
+                    style={[styles.replayBtn, isPlayingAudio && styles.replayBtnActive]}
+                    onPress={() => playAudio(audioBase64)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name={isPlayingAudio ? 'volume-high' : 'volume-medium-outline'}
+                      size={18}
+                      color={isPlayingAudio ? '#FFFFFF' : colors.primary}
+                    />
+                    <Text style={[styles.replayBtnText, isPlayingAudio && { color: '#FFFFFF' }]}>
+                      {isPlayingAudio ? 'Playing' : 'Replay Voice'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
                 <TouchableOpacity
-                  style={[styles.audioPill, isPlayingAudio && styles.audioPillActive]}
-                  onPress={() => playAudio(audioBase64)}
+                  style={[styles.clearActionBtn, { borderColor }]}
+                  onPress={handleClear}
                   activeOpacity={0.7}
                 >
-                  <Ionicons
-                    name={isPlayingAudio ? 'volume-high' : 'volume-medium-outline'}
-                    size={15}
-                    color={isPlayingAudio ? '#FFFFFF' : colors.primary}
-                  />
-                  <Text style={[styles.audioPillText, isPlayingAudio && { color: '#FFFFFF' }]}>
-                    {isPlayingAudio ? 'Playing Voice' : 'Replay Voice'}
-                  </Text>
+                  <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
+                  <Text style={[styles.clearActionText, { color: colors.textSecondary }]}>Clear</Text>
                 </TouchableOpacity>
-              ) : null}
+              </View>
             </View>
+          ) : (
+            <View style={styles.emptyPromptContainer}>
+              <Text style={[styles.emptyPromptTitle, { color: colors.text }]}>
+                Tap Mic & Speak
+              </Text>
+              <Text style={[styles.emptyPromptSub, { color: colors.textSecondary }]}>
+                {speechMode === 'auto'
+                  ? 'Whisper recognizes your language live'
+                  : (speechMode === 'en' ? 'Speak English ➔ Translates to Manipuri' : 'Speak Manipuri ➔ Translates to English')}
+              </Text>
+            </View>
+          )}
 
-            <Text
-              style={[
-                styles.mainTextDisplay,
-                targetLang === 'mni' && styles.manipuriText,
-                { color: colors.text },
-              ]}
-              selectable
-            >
-              {translatedText || 'Translation appears here...'}
-            </Text>
-          </View>
-
-          {/* ════════════════ ONE CENTRAL MIC BUTTON ════════════════ */}
-          <View style={styles.singleMicSection}>
+          {/* ════════════════ THE ONE CENTRAL MIC BUTTON ════════════════ */}
+          <View style={styles.micWrapper}>
             <View style={styles.pulseContainer}>
               <Animated.View
                 style={[
                   styles.pulseRing,
                   {
                     transform: [{ scale: pulseAnim }],
-                    backgroundColor: isRecording ? '#EF444430' : (isProcessing ? '#0D948830' : colors.primary + '25'),
+                    backgroundColor: isRecording
+                      ? '#EF444435'
+                      : (isProcessing ? '#0D948835' : colors.primary + '25'),
                   },
                 ]}
               />
@@ -384,38 +480,33 @@ export default function ConversationScreen() {
                       : (isProcessing ? '#0D9488' : colors.primary),
                   },
                 ]}
-                onPress={handleSingleMicPress}
+                onPress={handleMicPress}
                 activeOpacity={0.85}
               >
                 {isProcessing ? (
                   <ActivityIndicator size="large" color="#FFFFFF" />
                 ) : (
                   <Ionicons
-                    name={isRecording ? 'mic' : 'mic-outline'}
-                    size={38}
+                    name={isRecording ? 'stop' : 'mic'}
+                    size={46}
                     color="#FFFFFF"
                   />
                 )}
               </TouchableOpacity>
             </View>
 
-            <Text style={[styles.micPromptText, { color: colors.text }]}>
-              {isRecording
-                ? 'Listening... Tap to finish'
-                : (isProcessing ? 'Processing & synthesizing voice...' : 'Tap Mic to Speak')}
-            </Text>
-            <Text style={[styles.micSubPromptText, { color: colors.textSecondary }]}>
-              Auto-detects language and plays sound automatically
+            <Text style={[styles.statusText, { color: colors.text }]}>
+              {statusMessage}
             </Text>
           </View>
-        </ScrollView>
+        </View>
 
-        {/* ════════════════ BOTTOM TEXT INPUT (SIMPLE WRITE) ════════════════ */}
+        {/* ════════════════ BOTTOM TEXT INPUT ════════════════ */}
         <View style={[styles.bottomInputBar, { backgroundColor: cardBg, borderTopColor: borderColor, paddingBottom: Math.max(insets.bottom, 12) }]}>
           <View style={[styles.inputFieldContainer, { backgroundColor: inputBg, borderColor }]}>
             <TextInput
               style={[styles.bottomTextInput, { color: colors.text }]}
-              placeholder="Type English or Manipuri to translate & speak..."
+              placeholder="Type English or Manipuri to speak..."
               placeholderTextColor={colors.textSecondary}
               value={bottomInput}
               onChangeText={setBottomInput}
@@ -468,14 +559,14 @@ const styles = StyleSheet.create({
   topHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
   backBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -494,183 +585,141 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   headerSubTitle: {
-    fontSize: 11,
+    fontSize: 12,
     marginTop: 1,
     fontWeight: '500',
   },
-  statusDotWrapper: {
+  modeSelectorWrap: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-  },
-  statusDotText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  scrollContent: {
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 24,
+    paddingBottom: 8,
   },
-  statusBanner: {
-    paddingVertical: 6,
+  modePill: {
     paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    alignSelf: 'center',
-    marginBottom: 12,
-  },
-  statusMessageText: {
-    fontSize: 11.5,
-    fontWeight: '600',
-  },
-  card: {
+    paddingVertical: 6,
     borderRadius: 16,
     borderWidth: 1,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
   },
-  resultCard: {
-    borderWidth: 1.5,
+  modePillText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
-  cardHeader: {
-    flexDirection: 'row',
+  centerStage: {
+    flex: 1,
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
   },
-  tagRow: {
+  resultContainer: {
+    width: '100%',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 12,
+  },
+  spokenSubtext: {
+    fontSize: 15,
+    fontWeight: '500',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  translatedMainText: {
+    fontSize: 24,
+    lineHeight: 34,
+    fontWeight: '800',
+    textAlign: 'center',
+    letterSpacing: -0.3,
+  },
+  manipuriText: {
+    fontSize: 28,
+    lineHeight: 40,
+    fontWeight: '700',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 14,
+  },
+  replayBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-  },
-  flagEmoji: {
-    fontSize: 15,
-  },
-  tagText: {
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  audioPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
     backgroundColor: '#0D948818',
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 18,
   },
-  audioPillActive: {
+  replayBtnActive: {
     backgroundColor: '#0D9488',
   },
-  audioPillText: {
-    fontSize: 11,
+  replayBtnText: {
+    fontSize: 13,
     fontWeight: '700',
     color: '#0D9488',
   },
-  mainTextDisplay: {
-    fontSize: 17,
-    lineHeight: 24,
-    fontWeight: '500',
-  },
-  manipuriText: {
-    fontSize: 20,
-    lineHeight: 28,
-    fontWeight: '700',
-  },
-  flowRow: {
+  clearActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 10,
-    paddingHorizontal: 20,
-  },
-  flowLine: {
-    flex: 1,
-    height: 1,
-  },
-  flowIconCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 18,
     borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 10,
   },
-  singleMicSection: {
+  clearActionText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  emptyPromptContainer: {
     alignItems: 'center',
-    marginVertical: 18,
+    marginTop: 40,
+  },
+  emptyPromptTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  emptyPromptSub: {
+    fontSize: 13,
+    marginTop: 6,
+  },
+  micWrapper: {
+    alignItems: 'center',
+    marginBottom: 30,
   },
   pulseContainer: {
-    width: 100,
-    height: 100,
+    width: 150,
+    height: 150,
     alignItems: 'center',
     justifyContent: 'center',
   },
   pulseRing: {
     position: 'absolute',
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
   },
   singleMicButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 6,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
   },
-  micPromptText: {
+  statusText: {
     fontSize: 15,
-    fontWeight: '700',
-    marginTop: 8,
-  },
-  micSubPromptText: {
-    fontSize: 11,
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  quickChipsWrapper: {
-    marginTop: 4,
-    marginBottom: 10,
-  },
-  chipsScroll: {
-    gap: 8,
-    paddingHorizontal: 2,
-  },
-  quickChip: {
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  chipLabel: {
-    fontSize: 9.5,
-    fontWeight: '700',
-  },
-  chipText: {
-    fontSize: 12,
-    fontWeight: '500',
-    marginTop: 1,
+    fontWeight: '600',
+    marginTop: 16,
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
   bottomInputBar: {
     borderTopWidth: 1,
@@ -695,9 +744,9 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   sendBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },

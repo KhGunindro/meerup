@@ -13,12 +13,6 @@ import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { translateText } from '@/utils/meerupApi';
 
-const QUICK_PHRASES = [
-  { en: 'Welcome to Manipur', mni: 'ꯃꯅꯤꯄꯨꯔꯗ ꯇꯔꯥꯝꯅ ꯑꯣꯛꯆꯔꯤ' },
-  { en: 'How much is this?', mni: 'ꯃꯁꯤ ꯀꯌꯥꯅꯣ?' },
-  { en: 'Where is Kangla Fort?', mni: 'ꯀꯡꯂꯥ ꯐꯣꯔꯠ ꯀꯗꯥꯏꯗ ꯂꯩꯕꯒꯦ?' },
-  { en: 'Thank you very much', mni: 'ꯌꯥꯝꯅ ꯊꯥꯒꯠꯆꯔꯤ' },
-];
 
 export function MeeteilonTranslator() {
   const router = useRouter();
@@ -53,16 +47,6 @@ export function MeeteilonTranslator() {
       setErrorMsg(e.message || 'Translation failed');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleSelectQuickPhrase = (phrase: typeof QUICK_PHRASES[0]) => {
-    if (direction === 'en-mni') {
-      setInputText(phrase.en);
-      setTranslatedText(phrase.mni);
-    } else {
-      setInputText(phrase.mni);
-      setTranslatedText(phrase.en);
     }
   };
 
@@ -137,22 +121,6 @@ export function MeeteilonTranslator() {
             />
           )}
         </TouchableOpacity>
-      </View>
-
-      {/* Quick phrase chips */}
-      <View style={styles.chipsRow}>
-        {QUICK_PHRASES.map((phrase, idx) => (
-          <TouchableOpacity
-            key={idx}
-            style={[styles.chip, { backgroundColor: inputBg, borderColor: colors.border }]}
-            onPress={() => handleSelectQuickPhrase(phrase)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.chipText, { color: colors.textSecondary }]}>
-              {direction === 'en-mni' ? phrase.en : phrase.mni}
-            </Text>
-          </TouchableOpacity>
-        ))}
       </View>
 
       {/* Translation Result Output */}

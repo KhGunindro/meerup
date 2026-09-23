@@ -13,6 +13,8 @@ export interface ApiResponse {
   text?: string;
   originalText?: string;
   audioBase64?: string;
+  sourceLanguage?: string;
+  targetLanguage?: string;
   error?: string;
   provider?: string;
   latencyMs?: number;
@@ -128,6 +130,8 @@ export const speechToSpeechJson = async (
       text: data.translated_text || '',
       originalText: data.recognized_text || '',
       audioBase64: data.audio_base64 || '',
+      sourceLanguage: data.source_language || sourceLanguage,
+      targetLanguage: data.target_language || targetLanguage,
       provider: data.provider || 'AI4Bharat IndicStack',
       latencyMs: data.latency_ms,
     };
@@ -143,13 +147,14 @@ export const speechToSpeechJson = async (
  */
 export const speechToSpeech = async (
   audioUriOrBase64: string,
-  sourceLanguage: 'en' | 'mni' = 'en',
-  targetLanguage: 'en' | 'mni' = 'mni'
+  sourceLanguage: 'auto' | 'en' | 'mni' = 'auto',
+  targetLanguage: 'auto' | 'en' | 'mni' = 'mni',
+  voiceGender: 'female' | 'male' = 'female'
 ): Promise<ApiResponse> => {
   try {
     // If it is a base64 string directly
     if (audioUriOrBase64.startsWith('data:') || (!audioUriOrBase64.startsWith('file://') && !audioUriOrBase64.startsWith('content://') && audioUriOrBase64.length > 200)) {
-      return await speechToSpeechJson(audioUriOrBase64, sourceLanguage, targetLanguage);
+      return await speechToSpeechJson(audioUriOrBase64, sourceLanguage as any, targetLanguage as any, voiceGender);
     }
 
     // Try reading file as base64 first
@@ -159,7 +164,7 @@ export const speechToSpeech = async (
         encoding: FileSystem.EncodingType?.Base64 || 'base64',
       });
       if (b64) {
-        return await speechToSpeechJson(b64, sourceLanguage, targetLanguage);
+        return await speechToSpeechJson(b64, sourceLanguage as any, targetLanguage as any, voiceGender);
       }
     } catch {
       // Fallback to multipart FormData
@@ -173,6 +178,7 @@ export const speechToSpeech = async (
     } as any);
     formData.append('source_language', sourceLanguage);
     formData.append('target_language', targetLanguage);
+    formData.append('voice_gender', voiceGender);
 
     const response = await fetch(`${TRANSLATION_API_BASE_URL}/api/sts`, {
       method: 'POST',
@@ -188,6 +194,8 @@ export const speechToSpeech = async (
       text: data.translated_text || '',
       originalText: data.recognized_text || '',
       audioBase64: data.audio_base64 || '',
+      sourceLanguage: data.source_language || sourceLanguage,
+      targetLanguage: data.target_language || targetLanguage,
       provider: data.provider,
       latencyMs: data.latency_ms,
     };

@@ -146,6 +146,7 @@ export default function DestinationDetail() {
             colors={colors}
             isDark={isDark}
             destinationName={dest.name}
+            destinationId={dest.id}
           />
         )}
 

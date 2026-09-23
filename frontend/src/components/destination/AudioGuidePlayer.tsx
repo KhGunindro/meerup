@@ -11,7 +11,12 @@ import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { AudioGuide } from '@/constants/destinations';
 import { Colors } from '@/constants/theme';
-import { synthesizeTextToSpeech, fetchAutoAudioTranscript } from '@/utils/meerupApi';
+import {
+  synthesizeTextToSpeech,
+  fetchAutoAudioTranscript,
+  fetchPregeneratedAudioGuide,
+} from '@/utils/meerupApi';
+import { PREGENERATED_STORIES, getPregeneratedAudio } from '@/constants/pregeneratedStories';
 
 // Safely require expo-av runtime
 let AudioRuntime: any = null;
@@ -26,6 +31,7 @@ interface AudioGuidePlayerProps {
   colors: (typeof Colors)['light' | 'dark'];
   isDark: boolean;
   destinationName?: string;
+  destinationId?: string;
 }
 
 export function AudioGuidePlayer({
@@ -33,18 +39,60 @@ export function AudioGuidePlayer({
   colors,
   isDark,
   destinationName,
+  destinationId,
 }: AudioGuidePlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
-  const [autoTranscripts, setAutoTranscripts] = useState<Record<string, string>>({});
   const [selectedLang, setSelectedLang] = useState<'en' | 'mni'>('en');
+
+  // Match pregenerated guide key (e.g. kangla-fort, loktak-lake, ima-keithel, etc.)
+  const guideKey = (destinationId || guide.title || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '-');
+  const matchedPregenKey =
+    Object.keys(PREGENERATED_STORIES).find(
+      (k) => guideKey.includes(k) || k.includes(guideKey)
+    ) || '';
+
+  const pregenStory = matchedPregenKey ? PREGENERATED_STORIES[matchedPregenKey] : null;
+
+  // Initialize transcripts directly from pregenerated stories for instant 0ms render
+  const [autoTranscripts, setAutoTranscripts] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    if (pregenStory) {
+      initial.en = pregenStory.transcriptEn;
+      initial.mni = pregenStory.transcriptMni;
+    }
+    return initial;
+  });
 
   // Sound instance references
   const nativeSoundRef = useRef<any>(null);
   const webAudioRef = useRef<any>(null);
   // Cache base64 audio per language so repeat plays are instant
   const audioCacheRef = useRef<Record<string, string>>({});
+
+  // Pre-seed audioCache from pregenerated store immediately
+  useEffect(() => {
+    if (matchedPregenKey) {
+      const enAudio = getPregeneratedAudio(matchedPregenKey, 'en');
+      const mniAudio = getPregeneratedAudio(matchedPregenKey, 'mni');
+      if (enAudio) audioCacheRef.current['en'] = enAudio;
+      if (mniAudio) audioCacheRef.current['mni'] = mniAudio;
+
+      // Also ensure backend pregenerated fallback is ready if needed
+      if (!audioCacheRef.current[selectedLang]) {
+        fetchPregeneratedAudioGuide(matchedPregenKey, selectedLang)
+          .then((res) => {
+            if (res?.audioBase64) {
+              audioCacheRef.current[selectedLang] = res.audioBase64;
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [matchedPregenKey, selectedLang]);
 
   // Fallback language object if offline
   const activeLangObj =
@@ -75,9 +123,11 @@ export function AudioGuidePlayer({
     return activeLangObj?.text || guide.title;
   };
 
-  // Automatically request model transcript on mount and on language toggle
+  // If no pregenerated story exists, request model transcript on mount and on language toggle
   useEffect(() => {
-    getOrFetchTranscript(selectedLang);
+    if (!autoTranscripts[selectedLang]) {
+      getOrFetchTranscript(selectedLang);
+    }
   }, [selectedLang, guide.title]);
 
   const activeTranscript =
@@ -139,6 +189,22 @@ export function AudioGuidePlayer({
       }
 
       let b64 = audioCacheRef.current[selectedLang];
+      if (!b64 && matchedPregenKey) {
+        const localAudio = getPregeneratedAudio(matchedPregenKey, selectedLang);
+        if (localAudio) {
+          b64 = localAudio;
+          audioCacheRef.current[selectedLang] = b64;
+        }
+      }
+      if (!b64 && matchedPregenKey) {
+        try {
+          const pregenRes = await fetchPregeneratedAudioGuide(matchedPregenKey, selectedLang);
+          if (pregenRes?.audioBase64) {
+            b64 = pregenRes.audioBase64;
+            audioCacheRef.current[selectedLang] = b64;
+          }
+        } catch (e) {}
+      }
       if (!b64) {
         const result = await synthesizeTextToSpeech(transcriptText, selectedLang, 'female');
         if (result.audioBase64) {

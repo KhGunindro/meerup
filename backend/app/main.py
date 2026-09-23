@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.ai.router import openai_compat_router, router as ai_router
 from app.tourism.router import router as recommendations_router
 from app.vision.router import get_landmark_service, router as vision_router
 
@@ -52,6 +53,8 @@ app.add_middleware(
 # Include routes
 app.include_router(vision_router)
 app.include_router(recommendations_router)
+app.include_router(ai_router)
+app.include_router(openai_compat_router)
 
 
 @app.get("/", tags=["Health"])
@@ -70,6 +73,10 @@ async def root():
             "nearby_cards": "GET /api/recommendations/nearby?latitude=24.8170&longitude=93.9368&radius_km=20",
             "search_cards": "GET /api/recommendations/search?q=Andro",
             "single_card": "GET /api/recommendations/{place_id}/card",
+        },
+        "grounded_ai_endpoints": {
+            "chat_grounded": "POST /api/chat/grounded",
+            "openai_compat": "POST /v1/chat/completions",
         },
     }
 

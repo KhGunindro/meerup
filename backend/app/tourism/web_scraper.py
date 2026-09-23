@@ -297,6 +297,84 @@ CURATED_DESTINATIONS: dict[str, dict] = {
             "hashtags": ["#KanglaFort", "#KanglaSha", "#ImphalHeritage", "#MeiteiHistory", "#ManipurKingdom"],
         },
     },
+    "shirui": {
+        "title": "Shirui Kashong Peak & Shirui Lily",
+        "hero_image": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80",
+        "gallery_images": [
+            "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=600&q=80",
+        ],
+        "badge": "State Flower Sanctuary",
+        "rating": 4.8,
+        "review_count": 920,
+        "best_time_to_visit": "Late May to Early June (Only 2 weeks blooming window for Shirui Lily)",
+        "entry_fee": "₹30-₹50 eco-development fee at Shirui Village checkpost",
+        "opening_hours": "Daylight hours (Trek must start before 07:00 AM)",
+        "web_summary": (
+            "Shirui Kashong Peak (altitude 2,835m) in Ukhrul district is the only natural habitat on Earth of the rare pinkish-white "
+            "Shirui Lily (Lilium mackliniae). Located ~95 km from Imphal, reaching it takes 3.5 to 4 hours by road to Shirui village, "
+            "followed by a strenuous 2 to 3 hour steep mountain trek to the peak. A full day (or 2 days with an overnight in Ukhrul) "
+            "is required; visiting in 120 minutes is completely impossible."
+        ),
+        "social": {
+            "trending_score": 97,
+            "instagram_spots": [
+                "Blooming Shirui Lily close-ups along misty mountain ridges",
+                "Summit panoramic view of surrounding Indo-Myanmar mountain ranges",
+                "Wild rhododendron blooms along the lower rocky trail",
+            ],
+            "youtube_vlogs": [
+                {
+                    "title": "Trek to Find the Rare Shirui Lily | Ukhrul Manipur Expedition",
+                    "channel": "Mountain Trekker",
+                    "url": "https://www.youtube.com/results?search_query=Shirui+Lily+trek+Ukhrul+Manipur",
+                }
+            ],
+            "traveler_tips": [
+                "Plan for at least a full day (10-12 hours) or 2 days. The drive alone takes 3.5 to 4 hours each way from Imphal.",
+                "Start the trek from Shirui village early in the morning (around 6:30 AM) before afternoon clouds and fog roll in.",
+                "Do NOT pluck or disturb the lilies—they are strictly protected endangered species with heavy fines for damage.",
+                "Wear sturdy trekking boots with good grip; the mountain path gets muddy and steep.",
+            ],
+            "hashtags": ["#ShiruiLily", "#ShiruiKashong", "#UkhrulManipur", "#LiliumMackliniae", "#TrekkingManipur"],
+        },
+    },
+    "dzuko": {
+        "title": "Dzukou Valley (Valley of Flowers)",
+        "hero_image": "https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=800&q=80",
+        "gallery_images": [
+            "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=600&q=80",
+        ],
+        "badge": "High Altitude Trekking Paradise",
+        "rating": 4.9,
+        "review_count": 850,
+        "best_time_to_visit": "June to September for flowers; October to March for clear views",
+        "entry_fee": "₹100 entry fee + camping charges",
+        "opening_hours": "Trek entry daylight hours only",
+        "web_summary": (
+            "Nestled on the Manipur-Nagaland border at 2,452 meters altitude, Dzukou Valley is famed for its gently rolling green hillocks, "
+            "natural flower blooms including the endemic Dzukou Lily, and crystal clear mountain brooks. Requires a multi-hour hike."
+        ),
+        "social": {
+            "trending_score": 98,
+            "instagram_spots": [
+                "Endless emerald green rolling hillocks under dramatic clouds",
+                "Sunrise from the Dzukou Valley rim rest house",
+                "Crystal clear meandering natural stream in the valley floor",
+            ],
+            "youtube_vlogs": [
+                {
+                    "title": "Dzukou Valley Trek Guide from Manipur Side | Complete Budget Guide",
+                    "channel": "Nomadic Tour",
+                    "url": "https://www.youtube.com/results?search_query=Dzukou+Valley+Manipur+trek",
+                }
+            ],
+            "traveler_tips": [
+                "Requires a 2-day or 3-day expedition. Not possible as a short trip.",
+                "Carry warm thermal layers and rainproof poncho; temperatures drop near freezing at night.",
+            ],
+            "hashtags": ["#DzukouValley", "#ValleyOfFlowers", "#NortheastIndia", "#Trekking"],
+        },
+    },
 }
 
 

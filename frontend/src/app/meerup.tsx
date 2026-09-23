@@ -29,6 +29,8 @@ import {
   API_BASE_URL,
   DestinationCard,
   LandmarkResponse,
+  WebSearchSnippet,
+  askGroundedChat,
   fetchNearbyRecommendations,
   searchRecommendations,
   speechToSpeech,
@@ -74,11 +76,51 @@ When suggesting or recommending attractions or places, always explicitly mention
   return prompt;
 }
 
+interface PlaceMention {
+  name: string;
+  lat: number;
+  lng: number;
+}
+
+interface ChatResponseData {
+  text: string;
+  searchSnippets?: WebSearchSnippet[];
+  places?: PlaceMention[];
+  timeFeasible?: boolean;
+}
+
 async function askLLM(
   history: Array<{ role: string; content: string }>,
   userText: string,
   ctx: UserContext,
-): Promise<string> {
+): Promise<ChatResponseData> {
+  // 1. Primary: Grounded Search + AI Tourism Engine (eliminates hallucinations via live Google/DDG search & distance checks)
+  try {
+    const grounded = await askGroundedChat(
+      userText,
+      ctx.latitude || 24.8170,
+      ctx.longitude || 93.9368,
+      ctx.available_minutes || undefined,
+      history
+    );
+    if (grounded && grounded.text) {
+      const places: PlaceMention[] = (grounded.places || []).map(p => ({
+        name: p.name,
+        lat: p.lat,
+        lng: p.lng,
+      }));
+      return {
+        text: grounded.text,
+        searchSnippets: grounded.search_snippets,
+        places: places.length > 0 ? places : undefined,
+        timeFeasible: grounded.time_feasible,
+      };
+    }
+  } catch (backendErr) {
+    console.warn('Backend Grounded Search+AI call unavailable, falling back:', backendErr);
+  }
+
+  // 2. Fallback to direct LM Studio endpoint
   const messages = [
     { role: 'system', content: buildSystemPrompt(ctx) },
     ...history,
@@ -111,41 +153,57 @@ async function askLLM(
       if (res.ok) {
         const data = await res.json();
         const content = data.choices?.[0]?.message?.content?.trim();
-        if (content) return content;
+        if (content) return { text: content };
       }
     } catch (_err) {
       // Continue to next candidate
     }
   }
 
-  // Grounded Manipur tourism guidance fallback
+  // 3. Grounded Manipur tourism guidance fallback
   const q = userText.toLowerCase();
+  if (q.includes('shirui') || q.includes('ukhrul') || q.includes('lily')) {
+    return {
+      text: "Shirui Kashong Peak in Ukhrul is home to the rare Shirui Lily (blooms late May–early June). The drive from Imphal takes 3.5 to 4 hours (95 km) via NH202, followed by a 2 to 3 hour steep mountain trek to the 2,835m peak. A full day (10+ hours) or overnight trip is required; short 2-hour trips are not possible.",
+      places: [{ name: 'Shirui Kashong Peak', lat: 25.1167, lng: 94.4333 }],
+    };
+  }
   if (q.includes('ima') || q.includes('keithel') || q.includes('market')) {
-    return "Ima Keithel in central Imphal is Asia's largest all-women market with a 500-year history. Over 4,000 women vendors run stalls offering handloom textiles, fresh local produce, and spices. It is also an iconic site of the historic Nupi Lan resistance.";
+    return {
+      text: "Ima Keithel in central Imphal is Asia's largest all-women market with a 500-year history. Over 4,000 women vendors run stalls offering handloom textiles, fresh local produce, and spices. It is also an iconic site of the historic Nupi Lan resistance.",
+      places: [{ name: 'Ima Keithel', lat: 24.8074, lng: 93.9358 }],
+    };
   }
   if (q.includes('kangla') || q.includes('fort') || q.includes('palace')) {
-    return "Kangla Fort is the ancient seat of the Meitei rulers beside the Imphal River. It features the sacred twin Kangla Sha dragon-lions, the historic Govindaji temple ruins, and the holy Nungjeng Pukhri pond.";
+    return {
+      text: "Kangla Fort is the ancient seat of the Meitei rulers beside the Imphal River. It features the sacred twin Kangla Sha dragon-lions, the historic Govindaji temple ruins, and the holy Nungjeng Pukhri pond.",
+      places: [{ name: 'Kangla Fort', lat: 24.8080, lng: 93.9400 }],
+    };
   }
   if (q.includes('loktak') || q.includes('sendra') || q.includes('lake')) {
-    return "Loktak Lake is the world's only floating lake, celebrated for its circular floating phumdis. Visit Sendra Island for 360-degree panoramic views or take a canoe boat ride with local fishermen.";
+    return {
+      text: "Loktak Lake is the world's only floating lake, celebrated for its circular floating phumdis. Visit Sendra Island for 360-degree panoramic views or take a canoe boat ride with local fishermen.",
+      places: [{ name: 'Loktak Lake', lat: 24.5320, lng: 93.7810 }],
+    };
   }
   if (q.includes('andro') || q.includes('pottery')) {
-    return "Andro is an ancient cultural heritage village renowned for coil pottery crafted exclusively by women, the Mutua Museum's traditional thatch huts, and a sacred fire kept burning for centuries.";
+    return {
+      text: "Andro is an ancient cultural heritage village renowned for coil pottery crafted exclusively by women, the Mutua Museum's traditional thatch huts, and a sacred fire kept burning for centuries.",
+      places: [{ name: 'Andro Heritage Village', lat: 24.7500, lng: 94.0667 }],
+    };
   }
   if (q.includes('sadu') || q.includes('waterfall') || q.includes('leimaram')) {
-    return "Sadu Chiru Waterfall is a beautiful three-tiered cascade inside green forested hills in Kangpokpi. A stone pathway leads to the falls—be sure to wear non-slip shoes!";
+    return {
+      text: "Sadu Chiru Waterfall is a beautiful three-tiered cascade inside green forested hills in Kangpokpi. A stone pathway leads to the falls—be sure to wear non-slip shoes!",
+    };
   }
-  return "Welcome to Manipur! I can guide you to Kangla Fort, Loktak Lake, Ima Keithel market, and cultural heritage at Andro. Check the cards below for nearby destinations, directions, and Instagram photo spots!";
+  return {
+    text: "Welcome to Manipur! I can guide you to Kangla Fort, Loktak Lake, Ima Keithel market, and cultural heritage at Andro. Check the cards below for nearby destinations, directions, and Instagram photo spots!",
+  };
 }
 // ───────────────────────────────────────────────────────────────────────────────
 
 // ─── Place mention parser & Google Maps navigation ────────────────────────────
-interface PlaceMention {
-  name: string;
-  lat: number;
-  lng: number;
-}
-
 interface PlaceCandidate {
   name: string;
   lat: number;
@@ -322,6 +380,8 @@ interface ChatMessage {
   places?: PlaceMention[];
   imageUri?: string;
   landmark?: LandmarkResponse;
+  searchSnippets?: WebSearchSnippet[];
+  timeFeasible?: boolean;
 }
 
 // LLM conversation history (separate from display messages — uses OpenAI roles)
@@ -481,7 +541,8 @@ export default function MeerupScreen() {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
-      const reply = await askLLM(llmHistory, text, userContext);
+      const response = await askLLM(llmHistory, text, userContext);
+      const reply = response.text;
 
       // Update LLM history for multi-turn context
       setLlmHistory(prev => [
@@ -491,8 +552,18 @@ export default function MeerupScreen() {
       ]);
 
       setAiState('speaking');
-      const places = parsePlaceMentions(reply);
-      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'ai', text: reply, time: now, places };
+      const places = response.places && response.places.length > 0
+        ? response.places
+        : parsePlaceMentions(reply);
+      const aiMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'ai',
+        text: reply,
+        time: now,
+        places,
+        searchSnippets: response.searchSnippets,
+        timeFeasible: response.timeFeasible,
+      };
       setMessages(prev => [...prev, aiMsg]);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
@@ -953,6 +1024,33 @@ export default function MeerupScreen() {
                             ))}
                           </View>
                         )}
+                      </View>
+                    )}
+
+                    {/* ── Grounded Search Sources / Verification Note ── */}
+                    {msg.searchSnippets && msg.searchSnippets.length > 0 && (
+                      <View style={styles.groundedSourcesBubble}>
+                        <View style={styles.groundedSourcesHeader}>
+                          <MaterialIcons name="travel-explore" size={13} color={isDark ? '#60A5FA' : '#2563EB'} />
+                          <Text style={styles.groundedSourcesHeaderText}>
+                            Search + AI Grounded Fact Check
+                          </Text>
+                        </View>
+                        {msg.searchSnippets.slice(0, 2).map((s, idx) => (
+                          <TouchableOpacity
+                            key={idx}
+                            style={styles.snippetItem}
+                            onPress={() => s.url && Linking.openURL(s.url).catch(() => {})}
+                            accessibilityRole="link"
+                          >
+                            <Text style={styles.snippetTitle} numberOfLines={1}>
+                              • {s.title || 'Travel Guide Source'}
+                            </Text>
+                            <Text style={styles.snippetSnippet} numberOfLines={2}>
+                              {s.snippet}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
                       </View>
                     )}
 
@@ -2017,6 +2115,44 @@ const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
     color: isDark ? '#E5E7EB' : '#1F2937',
     flex: 1,
     lineHeight: 16,
+  },
+
+  // ── Search + AI Grounded Sources Bubble ──
+  groundedSourcesBubble: {
+    backgroundColor: isDark ? '#1E293B' : '#EFF6FF',
+    borderRadius: 12,
+    padding: 10,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: isDark ? '#3B82F6' : '#BFDBFE',
+  },
+  groundedSourcesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  groundedSourcesHeaderText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: isDark ? '#93C5FD' : '#1D4ED8',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  snippetItem: {
+    marginTop: 4,
+    paddingVertical: 2,
+  },
+  snippetTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: isDark ? '#E2E8F0' : '#1E3A8A',
+  },
+  snippetSnippet: {
+    fontSize: 11,
+    color: isDark ? '#94A3B8' : '#4B5563',
+    lineHeight: 15,
+    marginTop: 1,
   },
 
   // ── Recommendations Section ──

@@ -113,6 +113,20 @@ export interface SearchCardsResponse {
   cards: DestinationCard[];
 }
 
+export interface GroundedChatResponse {
+  text: string;
+  search_snippets: WebSearchSnippet[];
+  places: Array<{
+    name: string;
+    lat: number;
+    lng: number;
+    district: string;
+  }>;
+  matched_destination?: string | null;
+  time_feasible: boolean;
+  required_minutes?: number | null;
+}
+
 // ─── Translation & Voice API ──────────────────────────────────────────────────
 /**
  * Bidirectional English ⟷ Manipuri Text Translation
@@ -436,3 +450,37 @@ export const checkTranslationEngineHealth = async (): Promise<boolean> => {
     return false;
   }
 };
+
+/**
+ * Calls backend Search + AI Grounded Chat engine.
+ * Combines Google/DuckDuckGo web search with verified geographic facts
+ * to eliminate hallucinations on travel times and itineraries.
+ */
+export const askGroundedChat = async (
+  message: string,
+  latitude: number = 24.8170,
+  longitude: number = 93.9368,
+  availableMinutes?: number,
+  history?: Array<{ role: string; content: string }>
+): Promise<GroundedChatResponse> => {
+  const url = `${API_BASE_URL}/api/chat/grounded`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      message,
+      latitude,
+      longitude,
+      available_minutes: availableMinutes,
+      history,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Grounded Chat API error (${response.status})`);
+  }
+  return await response.json();
+};
+

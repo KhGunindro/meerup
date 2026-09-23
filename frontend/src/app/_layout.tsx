@@ -7,6 +7,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { TopNavBar } from '@/components/navigation/TopNavBar';
 import { BottomNavBar } from '@/components/navigation/BottomNavBar';
+import { AuthProvider } from '@/context/AuthContext';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -14,8 +15,9 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
+    <AuthProvider>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <AnimatedSplashOverlay />
       <Tabs
         tabBar={(props) => <BottomNavBar {...props} />}
         screenOptions={{
@@ -71,5 +73,6 @@ export default function RootLayout() {
         />
       </Tabs>
     </ThemeProvider>
+    </AuthProvider>
   );
 }

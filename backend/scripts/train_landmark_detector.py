@@ -27,11 +27,11 @@ def main() -> None:
 
     print(f"Scanning dataset at '{args.dataset}'...")
     summary = LandmarkDetector.train(args.dataset, args.output)
-    print(f"✅ Successfully saved {summary['references']} landmark references to {args.output}")
+    print(f"Successfully saved {summary['references']} landmark references to {args.output}")
     if summary['skipped'] > 0:
-        print(f"⚠️  Skipped {summary['skipped']} unreadable images")
+        print(f" Skipped {summary['skipped']} unreadable images")
     else:
-        print("✨ All images processed with zero errors.")
+        print("All images processed with zero errors.")
 
 
 if __name__ == "__main__":

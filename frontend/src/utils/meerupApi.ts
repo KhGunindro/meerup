@@ -1,13 +1,26 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
+// ─── Backend URL Configuration ────────────────────────────────────────────────
 // Determine host: Physical device via Expo uses Metro host IP, emulator uses 10.0.2.2
 const getHost = (): string => {
+  // If we're on web, use the browser's hostname
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    return window.location.hostname;
+  }
+  
+  // Try to get Expo's host URI (works for physical devices running Expo Go)
   const hostUri = Constants.expoConfig?.hostUri || (Constants as any)?.manifest2?.extra?.expoClient?.hostUri;
   if (hostUri) {
     return hostUri.split(':')[0];
   }
-  // Default to LAN IP if on physical device / network, fallback to emulator
+  
+  // Fallback for Android emulator
+  if (Platform.OS === 'android') {
+    return '10.0.2.2';
+  }
+  
+  // Default to LAN IP if on physical device / network, fallback to localhost
   return '192.168.68.59';
 };
 
@@ -21,7 +34,6 @@ export const TRANSLATION_API_BASE_URL =
 
 export const BACKEND_API_BASE_URL = `http://${HOST}:8001`;
 
-// ─── Backend URL Configuration ────────────────────────────────────────────────
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ||
   (typeof window !== 'undefined' && window.location?.hostname

@@ -23,14 +23,24 @@ export function getDistanceKm(lat1: number, lon1: number, lat2: number, lon2: nu
 }
 
 /**
- * Calculates realistic estimated travel time (in minutes) based on Manipur terrain/city driving speeds.
+ * Calculates realistic estimated travel time (in minutes) for a 4-wheeler (Car).
  */
-export function calculateEtaMinutes(distanceKm: number): number {
+export function calculateCarEtaMinutes(distanceKm: number): number {
   if (distanceKm <= 0.1) return 1;
-  // Realistic average speed in Imphal & Manipur valley: ~28 km/h + 3 mins start/turn buffer
   const avgSpeedKmh = distanceKm > 15 ? 35 : 25;
   const driveMinutes = Math.round((distanceKm / avgSpeedKmh) * 60) + 3;
   return Math.max(3, driveMinutes);
+}
+
+/**
+ * Calculates realistic estimated travel time (in minutes) for a 2-wheeler (Bike).
+ * Bikes are typically faster in city traffic.
+ */
+export function calculateBikeEtaMinutes(distanceKm: number): number {
+  if (distanceKm <= 0.1) return 1;
+  const avgSpeedKmh = distanceKm > 15 ? 45 : 35;
+  const driveMinutes = Math.round((distanceKm / avgSpeedKmh) * 60) + 2;
+  return Math.max(2, driveMinutes);
 }
 
 /**

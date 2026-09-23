@@ -314,16 +314,54 @@ export const speechToSpeech = async (
 };
 
 /**
- * Speech-to-Text Audio Transcription
+ * Speech-to-Text Audio Transcription via ASR model
+ * Supports both base64 JSON payload and multipart file upload
  */
 export const transcribeAudio = async (
-  audioUri: string,
+  audioUriOrBase64: string,
   sourceLanguage: 'en' | 'mni' = 'en'
 ): Promise<ApiResponse> => {
   try {
+    let cleanB64 = '';
+    if (audioUriOrBase64.startsWith('data:') || (!audioUriOrBase64.startsWith('file://') && !audioUriOrBase64.startsWith('content://') && audioUriOrBase64.length > 200)) {
+      cleanB64 = audioUriOrBase64.includes(',') ? audioUriOrBase64.split(',')[1] : audioUriOrBase64;
+    } else {
+      try {
+        const FileSystem = require('expo-file-system/legacy');
+        cleanB64 = await FileSystem.readAsStringAsync(audioUriOrBase64, {
+          encoding: FileSystem.EncodingType?.Base64 || 'base64',
+        });
+      } catch {
+        // Fallback to multipart
+      }
+    }
+
+    if (cleanB64) {
+      const response = await fetch(`${TRANSLATION_API_BASE_URL}/api/transcribe-json`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({
+          audio_base64: cleanB64,
+          source_language: sourceLanguage,
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          text: data.recognized_text || data.text || '',
+          originalText: data.recognized_text || data.text || '',
+          sourceLanguage: data.source_language || sourceLanguage,
+        };
+      }
+    }
+
+    // Multipart fallback
     const formData = new FormData();
     formData.append('file', {
-      uri: audioUri,
+      uri: audioUriOrBase64,
       type: 'audio/wav',
       name: 'recording.wav',
     } as any);
@@ -340,12 +378,49 @@ export const transcribeAudio = async (
     if (!response.ok) throw new Error(`ASR API error: HTTP ${response.status}`);
     const data = await response.json();
     return {
-      text: data.text || '',
-      originalText: data.text || '',
+      text: data.recognized_text || data.text || '',
+      originalText: data.recognized_text || data.text || '',
+      sourceLanguage: data.source_language || sourceLanguage,
       provider: data.provider,
     };
   } catch (error: any) {
     console.error('ASR Error:', error);
+    return { error: error.message };
+  }
+};
+
+/**
+ * Text-to-Speech (TTS) voice synthesizer
+ * Generates neural audio for English or Manipuri text
+ */
+export const synthesizeTextToSpeech = async (
+  text: string,
+  targetLanguage: 'en' | 'mni' = 'en',
+  voiceGender: 'female' | 'male' = 'female'
+): Promise<ApiResponse> => {
+  try {
+    const response = await fetch(`${TRANSLATION_API_BASE_URL}/api/tts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
+      body: JSON.stringify({
+        text,
+        target_language: targetLanguage,
+        voice_gender: voiceGender,
+      }),
+    });
+
+    if (!response.ok) throw new Error(`TTS API error: HTTP ${response.status}`);
+    const data = await response.json();
+    return {
+      text: data.text || text,
+      audioBase64: data.audio_base64 || '',
+      targetLanguage: data.target_language || targetLanguage,
+    };
+  } catch (error: any) {
+    console.error('TTS Error:', error);
     return { error: error.message };
   }
 };

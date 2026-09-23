@@ -33,6 +33,7 @@ import {
   searchRecommendations,
   speechToSpeech,
   transcribeAudio,
+  synthesizeTextToSpeech,
 } from '@/utils/meerupApi';
 import * as Location from 'expo-location';
 import { DESTINATIONS } from '@/constants/destinations';
@@ -86,9 +87,10 @@ async function askLLM(
   ];
 
   const candidateUrls = [
+    `${LLM_BASE_URL}/v1/chat/completions`,
+    `${LLM_BASE_URL}/chat/completions`,
     'http://localhost:8080/v1/chat/completions',
     'http://10.0.2.2:8080/v1/chat/completions',
-    `${LLM_BASE_URL}/chat/completions`,
   ];
 
   for (const url of candidateUrls) {
@@ -252,8 +254,51 @@ let AudioRuntime: typeof Audio | any;
 try {
   AudioRuntime = require('expo-av').Audio;
 } catch (e) {
-  console.info("expo-av native module not found. Audio features will be disabled.");
+  // expo-av fallback handled
 }
+
+let createAudioPlayer: any = null;
+let useAudioRecorder: any = null;
+let RecordingPresets: any = null;
+let setAudioModeAsync: any = null;
+
+try {
+  const expoAudio = require('expo-audio');
+  createAudioPlayer = expoAudio.createAudioPlayer;
+  useAudioRecorder = expoAudio.useAudioRecorder;
+  RecordingPresets = expoAudio.RecordingPresets;
+  setAudioModeAsync = expoAudio.setAudioModeAsync;
+} catch (e) {
+  // expo-audio fallback handled
+}
+
+export const playSpeechAudio = async (base64Data: string) => {
+  if (!base64Data) return;
+  try {
+    if (createAudioPlayer && FileSystem.cacheDirectory) {
+      const tempUri = `${FileSystem.cacheDirectory}speech_reply_${Date.now()}.wav`;
+      await FileSystem.writeAsStringAsync(tempUri, base64Data, {
+        encoding: FileSystem.EncodingType?.Base64 || 'base64',
+      });
+      const player = createAudioPlayer(tempUri);
+      player.play();
+      return;
+    }
+  } catch (e) {
+    console.log('expo-audio player fallback:', e);
+  }
+
+  if (AudioRuntime && FileSystem.cacheDirectory) {
+    try {
+      const outUri = `${FileSystem.cacheDirectory}speech_reply_${Date.now()}.wav`;
+      await FileSystem.writeAsStringAsync(outUri, base64Data, { encoding: FileSystem.EncodingType.Base64 });
+      const { sound } = await AudioRuntime.Sound.createAsync({ uri: outUri });
+      await sound.playAsync();
+    } catch (e) {
+      console.log('expo-av player fallback:', e);
+    }
+  }
+};
 import { Colors } from '@/constants/theme';
 
 const AnimatedPulseRing = ({ size, color, delay, active }: { size: number; color: string; delay: number; active: boolean }) => {
@@ -347,6 +392,7 @@ export default function MeerupScreen() {
   const [languagePair, setLanguagePair] = useState<'Manipuri ↔ English' | 'Hindi ↔ Manipuri'>('Manipuri ↔ English');
   const [isMicMuted, setIsMicMuted] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const audioRecorder = useAudioRecorder && RecordingPresets ? useAudioRecorder(RecordingPresets.HIGH_QUALITY) : null;
 
   // ─── Camera & Landmark AI ───────────────────────────────────────────
   const [cameraModalVisible, setCameraModalVisible] = useState(false);
@@ -610,7 +656,10 @@ export default function MeerupScreen() {
 
     let uri = '';
     try {
-      if (rec && typeof rec.stopAndUnloadAsync === 'function') {
+      if (audioRecorder && audioRecorder.isRecording) {
+        await audioRecorder.stop();
+        uri = audioRecorder.uri;
+      } else if (rec && typeof rec.stopAndUnloadAsync === 'function') {
         await rec.stopAndUnloadAsync();
         uri = rec.getURI();
       }
@@ -626,75 +675,139 @@ export default function MeerupScreen() {
     }
 
     try {
-      // Call STS endpoint
-      const response = await speechToSpeech(uri);
+      // ─── Step 1: ASR Transcription via our Model (Whisper / IndicConformer) ───
+      const asrLang = languagePair.includes('Hindi') ? 'hi' : (languagePair.includes('Manipuri') ? 'en' : 'en');
+      const asrResponse = await transcribeAudio(uri, asrLang as any);
+      const userSpokenText = asrResponse.text?.trim() || asrResponse.originalText?.trim() || '';
 
-      if (response.text) {
-        const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: '(Voice message sent)', time: 'Just now' };
-        const places = parsePlaceMentions(response.text);
-        const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'ai', text: response.text, time: 'Just now', places };
-        setMessages(prev => [...prev, userMsg, aiMsg]);
+      if (!userSpokenText) {
+        setAiState('idle');
+        return;
       }
+
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const userMsg: ChatMessage = {
+        id: Date.now().toString(),
+        role: 'user',
+        text: userSpokenText,
+        time: now,
+      };
+      setMessages(prev => [...prev, userMsg]);
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+
+      // ─── Step 2: AI Conversational Reasoning via LLM ───
+      const reply = await askLLM(llmHistory, userSpokenText, userContext);
+
+      // Update multi-turn history
+      setLlmHistory(prev => [
+        ...prev,
+        { role: 'user', content: userSpokenText },
+        { role: 'assistant', content: reply },
+      ]);
 
       setAiState('speaking');
-      if (response.audioBase64 && AudioRuntime) {
-        const outUri = FileSystem.cacheDirectory + 'sts_response.wav';
-        await FileSystem.writeAsStringAsync(outUri, response.audioBase64, { encoding: FileSystem.EncodingType.Base64 });
-        const { sound } = await AudioRuntime.Sound.createAsync({ uri: outUri });
-        await sound.playAsync();
+      const places = parsePlaceMentions(reply);
+      const aiMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'ai',
+        text: reply,
+        time: now,
+        places,
+      };
+      setMessages(prev => [...prev, aiMsg]);
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+
+      // ─── Step 3: Text-to-Speech (Voice Output) via our Neural TTS Model ───
+      try {
+        const hasMeetei = /[\uABC0-\uABFF\uAAE0-\uAAFF]/.test(reply);
+        const ttsTargetLang = hasMeetei ? 'mni' : 'en';
+        const ttsResponse = await synthesizeTextToSpeech(reply, ttsTargetLang, 'female');
+
+        if (ttsResponse.audioBase64) {
+          await playSpeechAudio(ttsResponse.audioBase64);
+        }
+      } catch (ttsErr) {
+        console.warn('TTS playback error:', ttsErr);
+      }
+
+      // Check recommendation cards for mentioned places
+      if (places.length > 0) {
+        const placeName = places[0].name;
+        searchRecommendations(placeName, userContext.latitude || undefined, userContext.longitude || undefined)
+          .then(cardRes => {
+            if (cardRes.cards && cardRes.cards.length > 0) {
+              setRecommendationCards(cardRes.cards);
+              setShowCards(true);
+              setCardsFilterTitle(`Featured: ${placeName}`);
+            }
+          })
+          .catch(() => { });
       }
     } catch (err) {
-      console.error(err);
+      console.error('Voice chat pipeline error:', err);
     }
 
-    setTimeout(() => setAiState('idle'), 3000);
+    setTimeout(() => setAiState('idle'), 3500);
   };
 
   const startRecording = async () => {
-    if (!AudioRuntime) {
-      console.warn("Audio is not available - falling back to simulated UI mode");
-      setAiState('listening');
-      setIsSpeaking(true);
-
-      // User must manually stop recording
-
-      return;
-    }
-    try {
-      const permission = await AudioRuntime.requestPermissionsAsync();
-      if (permission.status === 'granted') {
-        await AudioRuntime.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-        });
-
-        const options = {
-          ...AudioRuntime.RecordingOptionsPresets.HIGH_QUALITY,
-          isMeteringEnabled: true,
-        };
-
-        const { recording: newRecording } = await AudioRuntime.Recording.createAsync(
-          options,
-          (status: any) => {
-            if (status.isRecording && 'isMeteringEnabled' in status) {
-              const level = status.metering || -160;
-              if (level > -35) {
-                setIsSpeaking(true);
-                setIsSpeaking(true);
-              } else {
-                setIsSpeaking(false);
-              }
-            }
-          },
-          100
-        );
-
-        setRecording(newRecording);
+    // 1. Try modern expo-audio recorder
+    if (audioRecorder) {
+      try {
+        if (setAudioModeAsync) {
+          await setAudioModeAsync({
+            allowsRecording: true,
+            playsInSilentMode: true,
+          });
+        }
+        await audioRecorder.record();
+        setRecording(audioRecorder);
         setAiState('listening');
+        setIsSpeaking(true);
+        return;
+      } catch (e) {
+        console.warn('expo-audio record fallback to expo-av:', e);
       }
-    } catch (err) {
-      console.error('Failed to start recording', err);
     }
+
+    // 2. Fallback to legacy expo-av
+    if (AudioRuntime) {
+      try {
+        const permission = await AudioRuntime.requestPermissionsAsync();
+        if (permission.status === 'granted') {
+          await AudioRuntime.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+          });
+
+          const options = {
+            ...AudioRuntime.RecordingOptionsPresets.HIGH_QUALITY,
+            isMeteringEnabled: true,
+          };
+
+          const { recording: newRecording } = await AudioRuntime.Recording.createAsync(
+            options,
+            (status: any) => {
+              if (status.isRecording && 'isMeteringEnabled' in status) {
+                const level = status.metering || -160;
+                setIsSpeaking(level > -35);
+              }
+            },
+            100
+          );
+
+          setRecording(newRecording);
+          setAiState('listening');
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to start recording via expo-av:', err);
+      }
+    }
+
+    // 3. Fallback to simulated UI listening mode
+    setAiState('listening');
+    setIsSpeaking(true);
   };
 
   const toggleListening = async () => {

@@ -344,16 +344,26 @@ export const stopSpeechAudio = async (webViewRef?: any) => {
       activeWebAudio = null;
     }
     if (activeNativeSound) {
+      if (typeof activeNativeSound.pause === 'function') activeNativeSound.pause();
+      if (typeof activeNativeSound.pauseAsync === 'function') await activeNativeSound.pauseAsync();
       if (typeof activeNativeSound.stop === 'function') activeNativeSound.stop();
       if (typeof activeNativeSound.stopAsync === 'function') await activeNativeSound.stopAsync();
       if (typeof activeNativeSound.unloadAsync === 'function') await activeNativeSound.unloadAsync();
+      if (typeof activeNativeSound.release === 'function') activeNativeSound.release();
       activeNativeSound = null;
     }
     if (webViewRef && webViewRef.current) {
       webViewRef.current.injectJavaScript(`
         (function() {
-          var audios = document.querySelectorAll('audio');
-          audios.forEach(function(a) { a.pause(); a.currentTime = 0; });
+          try {
+            if (window.__currentAudio) {
+              window.__currentAudio.pause();
+              window.__currentAudio.currentTime = 0;
+              window.__currentAudio = null;
+            }
+            var audios = document.querySelectorAll('audio');
+            audios.forEach(function(a) { a.pause(); a.currentTime = 0; });
+          } catch(e) {}
         })();
         true;
       `);
@@ -422,7 +432,12 @@ export const playSpeechAudio = async (base64Data: string, webViewRef?: any) => {
       const jsCode = `
         (function() {
           try {
+            if (window.__currentAudio) {
+              window.__currentAudio.pause();
+              window.__currentAudio.currentTime = 0;
+            }
             var audio = new Audio("data:audio/wav;base64,${cleanB64}");
+            window.__currentAudio = audio;
             audio.play();
           } catch(e) {}
         })();
@@ -533,19 +548,41 @@ export default function MeerupScreen() {
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [audioNotice, setAudioNotice] = useState<string | null>(null);
   const audioRecorder = useAudioRecorder && RecordingPresets ? useAudioRecorder(RecordingPresets.HIGH_QUALITY) : null;
+  const speakTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const speakMessage = async (text: string, msgId: string) => {
     if (!text) return;
+
+    // Toggle stop if already speaking this message or speaking in general
+    if (speakingMsgId === msgId || (aiState === 'speaking' && speakingMsgId === msgId)) {
+      await handleStopAll();
+      return;
+    }
+
+    await handleStopAll();
+    setSpeakingMsgId(msgId);
+    setAiState('speaking');
+
     try {
-      setSpeakingMsgId(msgId);
       const ttsResponse = await synthesizeTextToSpeech(text, 'en', 'female');
       if (ttsResponse.audioBase64) {
         await playSpeechAudio(ttsResponse.audioBase64, webViewRef);
+        const wordCount = text.split(/\s+/).filter(Boolean).length;
+        const estimatedMs = Math.max(3500, Math.min(30000, (wordCount * 420) + 1200));
+
+        if (speakTimerRef.current) clearTimeout(speakTimerRef.current);
+        speakTimerRef.current = setTimeout(() => {
+          setSpeakingMsgId(null);
+          setAiState('idle');
+        }, estimatedMs);
+      } else {
+        setSpeakingMsgId(null);
+        setAiState('idle');
       }
     } catch (err) {
       console.warn('Speech playback error:', err);
-    } finally {
-      setTimeout(() => setSpeakingMsgId(null), 3000);
+      setSpeakingMsgId(null);
+      setAiState('idle');
     }
   };
 
@@ -689,8 +726,9 @@ export default function MeerupScreen() {
       const places = response.places && response.places.length > 0
         ? response.places
         : parsePlaceMentions(reply);
+      const aiMsgId = (Date.now() + 1).toString();
       const aiMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+        id: aiMsgId,
         role: 'ai',
         text: reply,
         time: now,
@@ -699,6 +737,7 @@ export default function MeerupScreen() {
         timeFeasible: response.timeFeasible,
       };
       setMessages(prev => [...prev, aiMsg]);
+      setSpeakingMsgId(aiMsgId);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
       // Play neural TTS audio in English for the reply
@@ -706,9 +745,22 @@ export default function MeerupScreen() {
         const ttsResponse = await synthesizeTextToSpeech(reply, 'en', 'female');
         if (ttsResponse.audioBase64) {
           await playSpeechAudio(ttsResponse.audioBase64, webViewRef);
+          const wordCount = reply.split(/\s+/).filter(Boolean).length;
+          const estimatedMs = Math.max(3500, Math.min(30000, (wordCount * 420) + 1200));
+
+          if (speakTimerRef.current) clearTimeout(speakTimerRef.current);
+          speakTimerRef.current = setTimeout(() => {
+            setSpeakingMsgId(null);
+            setAiState('idle');
+          }, estimatedMs);
+        } else {
+          setSpeakingMsgId(null);
+          setAiState('idle');
         }
       } catch (ttsErr) {
         console.warn('TTS playback error in handleSendText:', ttsErr);
+        setSpeakingMsgId(null);
+        setAiState('idle');
       }
 
       // Refresh recommendation cards if places are mentioned
@@ -733,8 +785,8 @@ export default function MeerupScreen() {
         time: now,
       };
       setMessages(prev => [...prev, errMsg]);
-    } finally {
-      setTimeout(() => setAiState('idle'), 1500);
+      setSpeakingMsgId(null);
+      setAiState('idle');
     }
   };
 
@@ -885,8 +937,9 @@ export default function MeerupScreen() {
       const places = response.places && response.places.length > 0
         ? response.places
         : parsePlaceMentions(reply);
+      const aiMsgId = (Date.now() + 1).toString();
       const aiMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+        id: aiMsgId,
         role: 'ai',
         text: reply,
         time: now,
@@ -895,6 +948,7 @@ export default function MeerupScreen() {
         timeFeasible: response.timeFeasible,
       };
       setMessages(prev => [...prev, aiMsg]);
+      setSpeakingMsgId(aiMsgId);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
       // ─── Step 3: Text-to-Speech (Voice Output) in English via Neural TTS Model ───
@@ -903,9 +957,22 @@ export default function MeerupScreen() {
 
         if (ttsResponse.audioBase64) {
           await playSpeechAudio(ttsResponse.audioBase64, webViewRef);
+          const wordCount = reply.split(/\s+/).filter(Boolean).length;
+          const estimatedMs = Math.max(3500, Math.min(30000, (wordCount * 420) + 1200));
+
+          if (speakTimerRef.current) clearTimeout(speakTimerRef.current);
+          speakTimerRef.current = setTimeout(() => {
+            setSpeakingMsgId(null);
+            setAiState('idle');
+          }, estimatedMs);
+        } else {
+          setSpeakingMsgId(null);
+          setAiState('idle');
         }
       } catch (ttsErr) {
         console.warn('TTS playback error:', ttsErr);
+        setSpeakingMsgId(null);
+        setAiState('idle');
       }
 
       // Check recommendation cards for mentioned places
@@ -923,9 +990,9 @@ export default function MeerupScreen() {
       }
     } catch (err) {
       console.error('Voice chat pipeline error:', err);
+      setSpeakingMsgId(null);
+      setAiState('idle');
     }
-
-    setTimeout(() => setAiState('idle'), 3500);
   };
 
   const startRecording = async () => {
@@ -1002,6 +1069,14 @@ export default function MeerupScreen() {
 
   const handleStopAll = async () => {
     await stopSpeechAudio(webViewRef);
+    if (speakTimerRef.current) {
+      clearTimeout(speakTimerRef.current);
+      speakTimerRef.current = null;
+    }
+    if (silenceTimer.current) {
+      clearTimeout(silenceTimer.current);
+      silenceTimer.current = null;
+    }
     if (recording) {
       try {
         if (audioRecorder && audioRecorder.isRecording) {
@@ -1014,10 +1089,7 @@ export default function MeerupScreen() {
       }
       setRecording(null);
     }
-    if (silenceTimer.current) {
-      clearTimeout(silenceTimer.current);
-      silenceTimer.current = null;
-    }
+    setSpeakingMsgId(null);
     setAiState('idle');
     setIsSpeaking(false);
   };
@@ -1275,7 +1347,7 @@ export default function MeerupScreen() {
                       <View style={styles.aiBubble}>
                         <Text style={styles.aiMessageText}>{msg.text}</Text>
 
-                        {/* Speaker Button to listen to the AI speech */}
+                        {/* Speaker Button to listen or stop speaking */}
                         <View style={styles.bubbleActionRow}>
                           <TouchableOpacity
                             style={[
@@ -1284,10 +1356,10 @@ export default function MeerupScreen() {
                             ]}
                             onPress={() => speakMessage(msg.text, msg.id)}
                             accessibilityRole="button"
-                            accessibilityLabel="Listen to this response"
+                            accessibilityLabel={speakingMsgId === msg.id ? "Stop speaking" : "Listen to this response"}
                           >
                             <MaterialIcons
-                              name={speakingMsgId === msg.id ? 'volume-up' : 'volume-down'}
+                              name={speakingMsgId === msg.id ? 'stop-circle' : 'volume-up'}
                               size={15}
                               color={speakingMsgId === msg.id ? '#FFFFFF' : '#047857'}
                             />
@@ -1297,7 +1369,7 @@ export default function MeerupScreen() {
                                 speakingMsgId === msg.id && { color: '#FFFFFF' },
                               ]}
                             >
-                              {speakingMsgId === msg.id ? 'Playing...' : 'Listen'}
+                              {speakingMsgId === msg.id ? 'Stop Speaking' : 'Listen'}
                             </Text>
                           </TouchableOpacity>
                         </View>
@@ -1474,7 +1546,24 @@ export default function MeerupScreen() {
 
           {/* BOTTOM INPUT */}
           <View style={[styles.bottomInputContainer, { paddingBottom: isKeyboardVisible ? 4 : Math.max(insets.bottom, 10) }]}>
-
+            {/* Floating banner when actively speaking */}
+            {(aiState === 'speaking' || speakingMsgId) && (
+              <View style={styles.activeSpeakingBanner}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <MaterialIcons name="volume-up" size={18} color="#047857" />
+                  <Text style={styles.activeSpeakingText} numberOfLines={1}>MEERUP is speaking...</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.stopSpeakingBtn}
+                  onPress={handleStopAll}
+                  accessibilityRole="button"
+                  accessibilityLabel="Stop speaking"
+                >
+                  <MaterialIcons name="stop-circle" size={16} color="#FFFFFF" />
+                  <Text style={styles.stopSpeakingBtnText}>Stop</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             <View style={styles.inputRow}>
               <TouchableOpacity
@@ -1503,6 +1592,15 @@ export default function MeerupScreen() {
               {inputText.trim().length > 0 ? (
                 <TouchableOpacity style={styles.sendBtn} onPress={() => handleSendText()}>
                   <MaterialIcons name="arrow-upward" size={20} color="#047857" />
+                </TouchableOpacity>
+              ) : (aiState === 'speaking' || speakingMsgId) ? (
+                <TouchableOpacity
+                  style={[styles.sendBtn, { backgroundColor: '#EF4444', borderColor: '#DC2626' }]}
+                  onPress={handleStopAll}
+                  accessibilityRole="button"
+                  accessibilityLabel="Stop speaking"
+                >
+                  <MaterialIcons name="stop" size={20} color="#FFFFFF" />
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity style={styles.sendBtn} onPress={() => {
@@ -2668,8 +2766,39 @@ const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
     alignSelf: 'flex-start',
   },
   listenBtnActive: {
-    backgroundColor: '#047857',
-    borderColor: '#047857',
+    backgroundColor: '#EF4444',
+    borderColor: '#DC2626',
+  },
+  activeSpeakingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : '#FEF2F2',
+    borderWidth: 1,
+    borderColor: isDark ? 'rgba(239, 68, 68, 0.3)' : '#FECACA',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  activeSpeakingText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: isDark ? '#FCA5A5' : '#DC2626',
+  },
+  stopSpeakingBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EF4444',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  stopSpeakingBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   listenBtnText: {
     fontSize: 12,

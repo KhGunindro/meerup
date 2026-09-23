@@ -125,7 +125,7 @@ def transliterate_mtei_to_deva(text: str) -> str:
 
 # Detect Apple Silicon GPU (MPS) or fallback to CPU
 DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
-print(f"🚀 [Local Indic Engine] Active device: {DEVICE}")
+print(f"[Local Indic Engine] Active device: {DEVICE}")
 
 # Model identifiers
 MODEL_NMT_EN_MNI = "ai4bharat/indictrans2-en-indic-dist-200M"
@@ -159,7 +159,7 @@ def get_nmt_en_mni():
             attn_implementation="eager"
         ).to(DEVICE)
         _nmt_en_mni_model.eval()
-        print("✅ [Local Engine] NMT (English -> Manipuri) loaded!")
+        print("[Local Engine] NMT (English -> Manipuri) loaded!")
     return _nmt_en_mni_tokenizer, _nmt_en_mni_model
 
 def get_nmt_mni_en():
@@ -178,7 +178,7 @@ def get_nmt_mni_en():
             attn_implementation="eager"
         ).to(DEVICE)
         _nmt_mni_en_model.eval()
-        print("✅ [Local Engine] NMT (Manipuri -> English) loaded!")
+        print("[Local Engine] NMT (Manipuri -> English) loaded!")
     return _nmt_mni_en_tokenizer, _nmt_mni_en_model
 
 def get_asr_en():
@@ -190,7 +190,7 @@ def get_asr_en():
             model=MODEL_ASR_EN,
             device=DEVICE
         )
-        print("✅ [Local Engine] English ASR loaded!")
+        print("[Local Engine] English ASR loaded!")
     return _asr_en_pipe
 
 def get_asr_mni():
@@ -203,7 +203,7 @@ def get_asr_mni():
             token=HF_TOKEN,
             local_files_only=True
         )
-        print("✅ [Local Engine] Manipuri ASR loaded!")
+        print("[Local Engine] Manipuri ASR loaded!")
     return _asr_mni_model
 
 # Bidirectional Devanagari to pure Meetei Mayek mapping (fixes AI4Bharat pivot script leaks)
@@ -504,7 +504,7 @@ def _nmt_en_to_mni_single(chunk: str) -> str:
         raw = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
         return clean_meetei_text(raw)
     except Exception as e:
-        print(f"⚠️ [NMT EN->MNI Error]: {e}")
+        print(f"[NMT EN->MNI Error]: {e}")
         return chunk
 
 def _nmt_mni_to_en_single(chunk: str) -> str:
@@ -654,8 +654,6 @@ def decode_audio_to_16k(audio_bytes: bytes) -> Optional[np.ndarray]:
     if not audio_bytes or len(audio_bytes) < 100:
         return None
     try:
-        with open("/tmp/debug_audio.bin", "wb") as f:
-            f.write(audio_bytes)
         try:
             data, sr = sf.read(io.BytesIO(audio_bytes))
         except Exception:

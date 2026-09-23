@@ -1,7 +1,16 @@
-import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
-// In Android emulator, 10.0.2.2 maps to the host machine's localhost (127.0.0.1)
-const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+// Determine host: Physical device via Expo uses Metro host IP, emulator uses 10.0.2.2
+const getHost = (): string => {
+  const hostUri = Constants.expoConfig?.hostUri || (Constants as any)?.manifest2?.extra?.expoClient?.hostUri;
+  if (hostUri) {
+    return hostUri.split(':')[0];
+  }
+  // Default to LAN IP if on physical device / network, fallback to emulator
+  return '192.168.68.59';
+};
+
+const HOST = getHost();
 
 export const TRANSLATION_API_BASE_URL = `http://${HOST}:8000`;
 export const BACKEND_API_BASE_URL = `http://${HOST}:8001`;

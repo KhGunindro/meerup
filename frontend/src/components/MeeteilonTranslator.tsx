@@ -10,9 +10,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Colors } from '@/constants/theme';
+import { Colors, MaxContentWidth } from '@/constants/theme';
 import { translateText } from '@/utils/meerupApi';
-
 
 export function MeeteilonTranslator() {
   const router = useRouter();
@@ -65,12 +64,12 @@ export function MeeteilonTranslator() {
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <View style={[styles.iconWrap, { backgroundColor: isDark ? '#14382B' : '#E6F4EA' }]}>
-            <Ionicons name="language" size={16} color={colors.primary} />
+            <Ionicons name="language" size={17} color={colors.primary} />
           </View>
-          <View>
+          <View style={styles.titleTextCol}>
             <Text style={[styles.title, { color: colors.text }]}>Meeteilon Translator</Text>
-            <Text style={[styles.subTitle, { color: colors.textSecondary }]}>
-              English ⟷ Manipuri (Meetei Mayek ꯃꯤꯇꯩ ꯃꯌꯦꯛ)
+            <Text style={[styles.subTitle, { color: colors.textSecondary }]} numberOfLines={1}>
+              English ⟷ Manipuri (ꯃꯤꯇꯩꯂꯣꯟ)
             </Text>
           </View>
         </View>
@@ -81,17 +80,52 @@ export function MeeteilonTranslator() {
           activeOpacity={0.7}
         >
           <Text style={[styles.directionText, { color: colors.text }]}>
-            {direction === 'en-mni' ? 'EN ➔ MNI' : 'MNI ➔ EN'}
+            {direction === 'en-mni' ? 'EN → MNI' : 'MNI → EN'}
           </Text>
           <Ionicons name="swap-horizontal" size={14} color={colors.primary} />
         </TouchableOpacity>
       </View>
 
-      {/* Input */}
+      {/* Prominent Live Voice Translation Button */}
+      <TouchableOpacity
+        style={[
+          styles.voiceBanner,
+          {
+            backgroundColor: isDark ? '#064E3B30' : '#ECFDF5',
+            borderColor: isDark ? '#05966950' : '#A7F3D0',
+          },
+        ]}
+        onPress={() => router.push('/conversation')}
+        activeOpacity={0.8}
+      >
+        <View style={styles.voiceBannerLeft}>
+          <View style={[styles.voiceMicCircle, { backgroundColor: colors.primary }]}>
+            <Ionicons name="mic" size={18} color="#FFFFFF" />
+          </View>
+          <View style={styles.voiceTextCol}>
+            <Text style={[styles.voiceTitle, { color: colors.text }]}>
+              Live Speech-to-Speech
+            </Text>
+            <Text style={[styles.voiceSub, { color: colors.textSecondary }]}>
+              Speak in English or Manipuri to translate live
+            </Text>
+          </View>
+        </View>
+        <View style={[styles.voiceBadge, { backgroundColor: colors.primary }]}>
+          <Text style={styles.voiceBadgeText}>Start</Text>
+          <Ionicons name="chevron-forward" size={13} color="#FFFFFF" />
+        </View>
+      </TouchableOpacity>
+
+      {/* Direct Text Translation Input */}
       <View style={[styles.inputBox, { backgroundColor: inputBg, borderColor: colors.border }]}>
         <TextInput
           style={[styles.input, { color: colors.text }]}
-          placeholder={direction === 'en-mni' ? 'Type in English (e.g. How are you?)...' : 'Type in Manipuri Meetei Mayek...'}
+          placeholder={
+            direction === 'en-mni'
+              ? 'Type in English (e.g. Where is the hotel?)...'
+              : 'Type in Manipuri Meetei Mayek...'
+          }
           placeholderTextColor={colors.textSecondary}
           value={inputText}
           onChangeText={setInputText}
@@ -125,13 +159,18 @@ export function MeeteilonTranslator() {
 
       {/* Translation Result Output */}
       {translatedText ? (
-        <View style={[styles.resultBox, { backgroundColor: isDark ? '#11221A' : '#F0FDF4', borderColor: colors.primary }]}>
+        <View
+          style={[
+            styles.resultBox,
+            { backgroundColor: isDark ? '#11221A' : '#F0FDF4', borderColor: colors.primary },
+          ]}
+        >
           <View style={styles.resultHeader}>
             <Text style={[styles.resultLabel, { color: colors.primary }]}>
               {direction === 'en-mni' ? 'Manipuri (Meetei Mayek)' : 'English Translation'}
             </Text>
             <View style={styles.badge}>
-              <Text style={styles.badgeText}>AI4Bharat IndicTrans2</Text>
+              <Text style={styles.badgeText}>IndicTrans2</Text>
             </View>
           </View>
           <Text style={[styles.resultText, { color: colors.text }]}>
@@ -141,69 +180,53 @@ export function MeeteilonTranslator() {
       ) : null}
 
       {errorMsg ? (
-        <Text style={styles.errorText}>⚠️ {errorMsg}</Text>
+        <Text style={styles.errorText}>{errorMsg}</Text>
       ) : null}
-
-      {/* 2-Person Conversation Mode Launcher */}
-      <TouchableOpacity
-        style={[styles.convBanner, { backgroundColor: isDark ? '#064E3B25' : '#ECFDF5', borderColor: '#0D948840' }]}
-        onPress={() => router.push('/conversation')}
-        activeOpacity={0.7}
-      >
-        <View style={styles.convBannerLeft}>
-          <View style={[styles.convIconCircle, { backgroundColor: isDark ? '#0D948830' : '#CCFBF1' }]}>
-            <Ionicons name="chatbubbles" size={17} color="#0D9488" />
-          </View>
-          <View style={styles.convTextCol}>
-            <Text style={[styles.convBannerTitle, { color: colors.text }]}>
-              Live Speech-to-Speech Translator 🎙️
-            </Text>
-            <Text style={[styles.convBannerSub, { color: colors.textSecondary }]}>
-              Tourist (English) ⟷ Local (Meeteilon) Speech
-            </Text>
-          </View>
-        </View>
-        <Ionicons name="chevron-forward" size={16} color="#0D9488" />
-      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 16,
+    width: '100%',
+    maxWidth: MaxContentWidth,
+    borderRadius: 20,
     borderWidth: 1,
     padding: 16,
-    marginHorizontal: 16,
-    marginTop: 16,
+    marginBottom: 24,
+    elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowRadius: 6,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     flex: 1,
+    marginRight: 8,
+  },
+  titleTextCol: {
+    flex: 1,
   },
   iconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   title: {
     fontSize: 15,
     fontWeight: '700',
+    letterSpacing: -0.2,
   },
   subTitle: {
     fontSize: 11,
@@ -212,28 +235,78 @@ const styles = StyleSheet.create({
   directionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 5,
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 8,
+    borderRadius: 10,
+    paddingHorizontal: 9,
     paddingVertical: 5,
   },
   directionText: {
     fontSize: 11,
     fontWeight: '600',
   },
+
+  // Live Speech Banner
+  voiceBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  voiceBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  voiceMicCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  voiceTextCol: {
+    flex: 1,
+  },
+  voiceTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  voiceSub: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  voiceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  voiceBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  // Text Input Box
   inputBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    marginBottom: 10,
   },
   input: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 13,
     paddingVertical: 4,
   },
   clearBtn: {
@@ -241,33 +314,19 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   translateBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 8,
-  },
-  chip: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-  },
-  chipText: {
-    fontSize: 11,
-    fontWeight: '500',
-  },
+
+  // Results
   resultBox: {
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    padding: 12,
-    marginTop: 6,
+    padding: 14,
+    marginTop: 12,
   },
   resultHeader: {
     flexDirection: 'row',
@@ -282,7 +341,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   badge: {
-    backgroundColor: '#0F766E20',
+    backgroundColor: '#0F766E18',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
@@ -293,46 +352,14 @@ const styles = StyleSheet.create({
     color: '#0F766E',
   },
   resultText: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '600',
-    lineHeight: 26,
+    lineHeight: 24,
   },
   errorText: {
     color: '#EF4444',
     fontSize: 12,
-    marginTop: 6,
-  },
-  convBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 12,
-    marginTop: 12,
-  },
-  convBannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  convIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  convTextCol: {
-    flex: 1,
-  },
-  convBannerTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  convBannerSub: {
-    fontSize: 11,
-    marginTop: 1,
+    marginTop: 8,
+    marginHorizontal: 4,
   },
 });

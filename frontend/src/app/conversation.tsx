@@ -197,7 +197,7 @@ export default function ConversationScreen() {
         setTranslatedText(res.text);
         if (res.audioBase64) {
           setAudioBase64(res.audioBase64);
-          setStatusMessage('🔊 Speaking...');
+          setStatusMessage('Speaking...');
           await playAudio(res.audioBase64);
         }
         setStatusMessage('Tap Mic to Speak');
@@ -246,7 +246,7 @@ export default function ConversationScreen() {
 
               if (res.audioBase64) {
                 setAudioBase64(res.audioBase64);
-                setStatusMessage('🔊 Speaking...');
+                setStatusMessage('Speaking...');
                 await playAudio(res.audioBase64);
               }
               setStatusMessage('Tap Mic to Speak');
@@ -292,11 +292,11 @@ export default function ConversationScreen() {
         }
 
         setIsRecording(true);
-        setStatusMessage('🎙️ Listening... Tap when finished');
+        setStatusMessage('Listening... Tap when finished');
       } catch (err: any) {
         console.log('Failed to start recording:', err);
         setIsRecording(true);
-        setStatusMessage('🎙️ Listening... Tap when finished');
+        setStatusMessage('Listening... Tap when finished');
       }
     }
   };
@@ -354,7 +354,7 @@ export default function ConversationScreen() {
           <View style={styles.headerTitleWrap}>
             <Text style={[styles.headerTitle, { color: colors.text }]}>Speech-to-Speech</Text>
             <Text style={[styles.headerSubTitle, { color: colors.textSecondary }]}>
-              English (🇬🇧) ⟷ Manipuri (🇮🇳 ꯃꯤꯇꯩꯂꯣꯟ)
+              English ⟷ Manipuri (ꯃꯤꯇꯩꯂꯣꯟ)
             </Text>
           </View>
         </View>
@@ -362,9 +362,9 @@ export default function ConversationScreen() {
         {/* ════════════════ LANGUAGE MODE SELECTOR ════════════════ */}
         <View style={styles.modeSelectorWrap}>
           {[
-            { id: 'auto', label: '⚡ Auto-Detect (Whisper)' },
-            { id: 'en', label: '🇬🇧 English ➔ 🇮🇳 Manipuri' },
-            { id: 'mni', label: '🇮🇳 Manipuri ➔ 🇬🇧 English' },
+            { id: 'auto', label: 'Auto Detect' },
+            { id: 'en', label: 'English → Manipuri' },
+            { id: 'mni', label: 'Manipuri → English' },
           ].map((item) => {
             const isSelected = speechMode === item.id;
             return (
@@ -400,7 +400,7 @@ export default function ConversationScreen() {
             <View style={styles.resultContainer}>
               {spokenText ? (
                 <Text style={[styles.spokenSubtext, { color: colors.textSecondary }]}>
-                  {spokenLang === 'en' ? '🇬🇧 Spoke English: ' : '🇮🇳 Spoke Manipuri: '}
+                  {spokenLang === 'en' ? 'Spoke English: ' : 'Spoke Manipuri: '}
                   {spokenText}
                 </Text>
               ) : null}
@@ -451,8 +451,8 @@ export default function ConversationScreen() {
               </Text>
               <Text style={[styles.emptyPromptSub, { color: colors.textSecondary }]}>
                 {speechMode === 'auto'
-                  ? 'Whisper recognizes your language live'
-                  : (speechMode === 'en' ? 'Speak English ➔ Translates to Manipuri' : 'Speak Manipuri ➔ Translates to English')}
+                  ? 'Auto-detects spoken language live'
+                  : (speechMode === 'en' ? 'Speak English → Translates to Manipuri' : 'Speak Manipuri → Translates to English')}
               </Text>
             </View>
           )}

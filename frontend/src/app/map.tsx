@@ -17,14 +17,21 @@ import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
+import Constants from 'expo-constants';
 import { WebView } from 'react-native-webview';
+import MapView, { Marker, Polyline, UrlTile, PROVIDER_DEFAULT } from 'react-native-maps';
+
+// react-native-maps requires native code — it only works in a dev build or production build,
+// NOT in Expo Go. Fall back to WebView/Leaflet when running inside Expo Go.
+const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
 
 import { Colors } from '@/constants/theme';
 import { DESTINATIONS } from '@/constants/destinations';
 import { getDestImg } from '@/constants/images';
 import {
   getDistanceKm,
-  calculateEtaMinutes,
+  calculateCarEtaMinutes,
+  calculateBikeEtaMinutes,
   formatEtaString,
   launchExternalNavigationApp,
 } from '@/utils/navigation';
@@ -97,6 +104,7 @@ export default function MapScreen() {
   const [isSavingTrip, setIsSavingTrip] = useState(false);
   const [tripSaved, setTripSaved] = useState(false);
   const webViewRef = useRef<WebView>(null);
+  const mapRef = useRef<MapView>(null);
 
   // Listen to incoming route params
   useEffect(() => {
@@ -123,10 +131,20 @@ export default function MapScreen() {
           const loc = await Location.getCurrentPositionAsync({
             accuracy: Location.Accuracy.Balanced,
           });
-          setUserLocation({
-            lat: loc.coords.latitude,
-            lng: loc.coords.longitude,
-          });
+          const lat = loc.coords.latitude;
+          const lng = loc.coords.longitude;
+          
+          // Snap to Imphal if device is reporting a location far outside India (e.g. Europe mock)
+          const distToImphal = getDistanceKm(lat, lng, DEFAULT_ORIGIN.lat, DEFAULT_ORIGIN.lng);
+          if (distToImphal > 1000) {
+            setUserLocation(DEFAULT_ORIGIN);
+            Alert.alert(
+              'Location Mocked',
+              `Your device is reporting coordinates outside Manipur (${lat.toFixed(4)}, ${lng.toFixed(4)} — ${Math.round(distToImphal)}km away). \n\nThis happens if you're indoors (Network/IP location fallback), using a VPN, or have a mock location set. \n\nWe have snapped you to Imphal for testing.`
+            );
+          } else {
+            setUserLocation({ lat, lng });
+          }
         }
       } catch (err) {
         console.warn('GPS location error:', err);
@@ -142,8 +160,12 @@ export default function MapScreen() {
     return getDistanceKm(userLocation.lat, userLocation.lng, selectedDest.lat, selectedDest.lng);
   }, [userLocation, selectedDest]);
 
-  const etaMinutes = useMemo(() => {
-    return calculateEtaMinutes(distanceKm);
+  const carEta = useMemo(() => {
+    return calculateCarEtaMinutes(distanceKm);
+  }, [distanceKm]);
+
+  const bikeEta = useMemo(() => {
+    return calculateBikeEtaMinutes(distanceKm);
   }, [distanceKm]);
 
   // Generate Swiggy-Style Leaflet HTML Map with Blue Polyline (#4777c2)
@@ -153,6 +175,7 @@ export default function MapScreen() {
     const dLat = selectedDest.lat;
     const dLng = selectedDest.lng;
     const dName = selectedDest.name.replace(/'/g, "\\'");
+    const CARTO_KEY = process.env.EXPO_PUBLIC_CARTO_API_KEY ?? '';
 
     // Generate intermediate waypoint for realistic road-like curved path
     const midLat = (uLat + dLat) / 2 + (dLng - uLng) * 0.08;
@@ -213,7 +236,6 @@ export default function MapScreen() {
             display: flex;
             flex-direction: column;
             align-items: center;
-            transform: translate(-50%, -100%);
           }
           .dest-label-tag {
             background: #111827;
@@ -256,7 +278,7 @@ export default function MapScreen() {
           });
 
           // Modern clean map tiles
-          L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}', {
             maxZoom: 19
           }).addTo(map);
 
@@ -314,6 +336,30 @@ export default function MapScreen() {
     `;
   }, [userLocation, selectedDest]);
 
+  // Native Route Coordinates
+  const nativeRouteCoords = useMemo(() => {
+    const uLat = userLocation.lat;
+    const uLng = userLocation.lng;
+    const dLat = selectedDest.lat;
+    const dLng = selectedDest.lng;
+    const midLat = (uLat + dLat) / 2 + (dLng - uLng) * 0.08;
+    const midLng = (uLng + dLng) / 2 - (dLat - uLat) * 0.08;
+    return [
+      { latitude: uLat, longitude: uLng },
+      { latitude: midLat, longitude: midLng },
+      { latitude: dLat, longitude: dLng },
+    ];
+  }, [userLocation, selectedDest]);
+
+  useEffect(() => {
+    if (mapRef.current && nativeRouteCoords.length === 3) {
+      mapRef.current.fitToCoordinates(nativeRouteCoords, {
+        edgePadding: { top: 100, right: 80, bottom: 350, left: 80 },
+        animated: true,
+      });
+    }
+  }, [nativeRouteCoords]);
+
   // Save Route to Supabase Trips
   const handleSaveRoute = async () => {
     if (!user) {
@@ -331,7 +377,7 @@ export default function MapScreen() {
         dest_lat: selectedDest.lat,
         dest_lng: selectedDest.lng,
         distance_km: parseFloat(distanceKm.toFixed(2)),
-        estimated_duration_minutes: etaMinutes,
+        estimated_duration_minutes: carEta,
         status: 'saved',
         route_summary: `Fastest route to ${selectedDest.name} (${distanceKm.toFixed(1)} km)`,
       });
@@ -357,7 +403,7 @@ export default function MapScreen() {
   // Share ETA with Friends
   const handleShareEta = async () => {
     try {
-      const msg = `📍 Tracking route to ${selectedDest.name} in Manipur via MEERUP!\nEstimated Time to Reach: ${formatEtaString(etaMinutes, distanceKm)}\nNavigating now.`;
+      const msg = `📍 Tracking route to ${selectedDest.name} in Manipur via MEERUP!\nEstimated Time to Reach: ${formatEtaString(carEta, distanceKm)}\nNavigating now.`;
       await Share.share({ message: msg });
     } catch (err) {
       console.warn('Share error:', err);
@@ -369,20 +415,73 @@ export default function MapScreen() {
       {/* ── MAP CANVAS (SWIGGY STYLE) ── */}
       <View style={StyleSheet.absoluteFill}>
         {Platform.OS === 'web' ? (
+          // ── WEB: iframe + Leaflet
           <iframe
             srcDoc={mapHtml}
             style={{ width: '100%', height: '100%', border: 'none' }}
             title="Swiggy-Style Manipur Map"
           />
-        ) : (
+        ) : IS_EXPO_GO ? (
+          // ── EXPO GO: react-native-maps is unavailable; use WebView + Leaflet
           <WebView
-            ref={webViewRef}
             source={{ html: mapHtml }}
             style={styles.webView}
             scrollEnabled={false}
+            allowsInlineMediaPlayback
             javaScriptEnabled
-            domStorageEnabled
           />
+        ) : (
+          // ── DEV BUILD / PRODUCTION: native MapView with CARTO tile overlay
+          <MapView
+            ref={mapRef}
+            style={styles.webView}
+            provider={PROVIDER_DEFAULT}
+            mapType="none"
+            initialRegion={{
+              latitude: userLocation.lat,
+              longitude: userLocation.lng,
+              latitudeDelta: 0.1,
+              longitudeDelta: 0.1,
+            }}
+          >
+            <UrlTile
+              urlTemplate={`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${process.env.EXPO_PUBLIC_CARTO_API_KEY}`}
+              maximumZ={19}
+              flipY={false}
+            />
+            {/* Glow Polyline */}
+            <Polyline
+              coordinates={nativeRouteCoords}
+              strokeColor="rgba(71, 119, 194, 0.25)"
+              strokeWidth={12}
+              lineCap="round"
+              lineJoin="round"
+            />
+            {/* Main Polyline */}
+            <Polyline
+              coordinates={nativeRouteCoords}
+              strokeColor="#4777c2"
+              strokeWidth={5}
+              lineCap="round"
+              lineJoin="round"
+            />
+            {/* User Marker */}
+            <Marker coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }} anchor={{ x: 0.5, y: 0.5 }}>
+              <View style={styles.userPulseContainer}>
+                <View style={styles.userPulseRing} />
+                <View style={styles.userPulseDot} />
+              </View>
+            </Marker>
+            {/* Destination Marker */}
+            <Marker coordinate={{ latitude: selectedDest.lat, longitude: selectedDest.lng }} anchor={{ x: 0.5, y: 1.0 }}>
+              <View style={styles.destPinBox}>
+                <Text style={styles.destLabelTag}>{selectedDest.name}</Text>
+                <View style={styles.destPinHead}>
+                  <Text style={styles.destPinIcon}>★</Text>
+                </View>
+              </View>
+            </Marker>
+          </MapView>
         )}
       </View>
 
@@ -443,7 +542,16 @@ export default function MapScreen() {
             onPress={async () => {
               try {
                 const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-                setUserLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+                const lat = loc.coords.latitude;
+                const lng = loc.coords.longitude;
+                const distToImphal = getDistanceKm(lat, lng, DEFAULT_ORIGIN.lat, DEFAULT_ORIGIN.lng);
+                
+                if (distToImphal > 1000) {
+                  setUserLocation(DEFAULT_ORIGIN);
+                  Alert.alert('Location Mocked', `Your device is reporting coordinates outside Manipur (${lat.toFixed(4)}, ${lng.toFixed(4)} — ${Math.round(distToImphal)}km away).\n\nSnapped to Imphal for testing.`);
+                } else {
+                  setUserLocation({ lat, lng });
+                }
               } catch {}
             }}
             accessibilityLabel="Recenter GPS"
@@ -469,7 +577,7 @@ export default function MapScreen() {
         {/* Live Status Row */}
         <View style={styles.statusRow}>
           <View style={styles.livePulseDot} />
-          <Text style={styles.statusBadgeText}>SWIGGY-STYLE GPS ROUTE</Text>
+          <Text style={styles.statusBadgeText}>LIVE GPS ROUTE</Text>
           {isLocating && (
             <ActivityIndicator size="small" color="#4777c2" style={{ marginLeft: 6 }} />
           )}
@@ -477,7 +585,10 @@ export default function MapScreen() {
 
         {/* Main ETA Header (Bold Blue) */}
         <View style={styles.etaRow}>
-          <Text style={styles.etaBoldText}>{etaMinutes} MINS</Text>
+          <Ionicons name="car" size={28} color="#4777c2" />
+          <Text style={styles.etaBoldText}>{carEta} MINS</Text>
+          <Ionicons name="bicycle" size={30} color="#4777c2" style={{ marginLeft: 4 }} />
+          <Text style={styles.etaBoldText}>{bikeEta} MINS</Text>
           <Text style={[styles.etaDotSeparator, { color: colors.textSecondary }]}>•</Text>
           <Text style={[styles.distanceBoldText, { color: colors.text }]}>
             {distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`}
@@ -695,7 +806,7 @@ const styles = StyleSheet.create({
   },
   etaRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     gap: 8,
     marginBottom: 2,
   },
@@ -808,5 +919,72 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#F9FAFB',
+  },
+  // Native Swiggy-style Marker Styles
+  userPulseContainer: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userPulseRing: {
+    position: 'absolute',
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(71, 119, 194, 0.4)',
+  },
+  userPulseDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#4777c2',
+    borderWidth: 3.5,
+    borderColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  destPinBox: {
+    alignItems: 'center',
+  },
+  destLabelTag: {
+    backgroundColor: '#111827',
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#4777c2',
+    overflow: 'hidden',
+    marginBottom: 2,
+  },
+  destPinHead: {
+    width: 32,
+    height: 32,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderBottomLeftRadius: 16,
+    backgroundColor: '#4777c2',
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    transform: [{ rotate: '-45deg' }],
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#4777c2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  destPinIcon: {
+    transform: [{ rotate: '45deg' }],
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '900',
   },
 });

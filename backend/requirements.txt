@@ -12,3 +12,4 @@ httpx
 opencv-python-headless
 python-multipart
 beautifulsoup4
+requests

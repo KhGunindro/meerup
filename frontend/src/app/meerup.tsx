@@ -41,7 +41,7 @@ import { RecommendationCardItem } from '@/components/destination/RecommendationC
 import { LandmarkCameraModal } from '@/components/vision/LandmarkCameraModal';
 
 // ─── Live LLM config ─────────────────────────────────────────────────────────
-const LLM_BASE_URL = 'https://5877-49-47-140-252.ngrok-free.app/v1';
+const LLM_BASE_URL = 'https://af1e-2409-40e7-408-6d82-4aef-9aa8-ca50-1f19.ngrok-free.app';
 const LLM_MODEL = 'lmstudio-community/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M';
 
 interface UserContext {

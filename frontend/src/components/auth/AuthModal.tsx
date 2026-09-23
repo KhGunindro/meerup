@@ -32,13 +32,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const isDark = scheme === 'dark';
   const colors = Colors[isDark ? 'dark' : 'light'];
 
-  const { signIn, signUp, resetPassword } = useAuth();
+  const { signIn, signUp, verifyOtp, resetPassword } = useAuth();
 
-  const [mode, setMode] = useState<'login' | 'signup' | 'forgot_password'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'signup' | 'forgot_password' | 'verify_otp'>(initialMode);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [otpCode, setOtpCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -49,6 +50,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setEmail('');
     setPassword('');
     setConfirmPassword('');
+    setOtpCode('');
     setErrorMessage(null);
     setSuccessMessage(null);
   };
@@ -75,6 +77,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setErrorMessage(error.message);
       } else {
         setSuccessMessage('Password reset link sent! Check your email inbox.');
+      }
+      return;
+    }
+
+    if (mode === 'verify_otp') {
+      if (!otpCode.trim()) {
+        setErrorMessage('Please enter the verification code sent to your email');
+        return;
+      }
+      setIsLoading(true);
+      const { error } = await verifyOtp(email, otpCode.trim());
+      setIsLoading(false);
+      if (error) {
+        setErrorMessage(error.message);
+      } else {
+        setSuccessMessage('Email verified successfully! Welcome to MEERUP.');
+        setTimeout(() => handleClose(), 1000);
       }
       return;
     }
@@ -109,7 +128,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           setSuccessMessage('Account created successfully!');
           setTimeout(() => handleClose(), 1000);
         } else {
-          setSuccessMessage('Check your email for the confirmation link to complete registration.');
+          setMode('verify_otp');
+          setSuccessMessage('Confirmation code sent! Enter the 6-digit code from your email below:');
         }
       }
       return;
@@ -164,7 +184,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </View>
 
               {/* Mode Tabs */}
-              {mode !== 'forgot_password' && (
+              {mode !== 'forgot_password' && mode !== 'verify_otp' && (
                 <View style={[styles.tabBar, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
                   <TouchableOpacity
                     style={[styles.tabItem, mode === 'login' && styles.tabItemActive]}
@@ -200,6 +220,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       Sign Up
                     </Text>
                   </TouchableOpacity>
+                </View>
+              )}
+
+              {mode === 'verify_otp' && (
+                <View style={styles.forgotHeader}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setMode('login');
+                      setErrorMessage(null);
+                      setSuccessMessage(null);
+                    }}
+                    style={styles.backToLoginBtn}
+                  >
+                    <MaterialIcons name="arrow-back" size={18} color="#4777c2" />
+                    <Text style={styles.backToLoginText}>Back to Sign In</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.forgotTitle, { color: colors.text }]}>Confirm Your Email</Text>
+                  <Text style={[styles.forgotSubtitle, { color: colors.textSecondary }]}>
+                    We sent a verification code to {email}. Enter the 6-digit code below to finish registration:
+                  </Text>
                 </View>
               )}
 
@@ -239,94 +279,120 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
               {/* Input Fields */}
               <View style={styles.formContainer}>
-                {mode === 'signup' && (
+                {mode === 'verify_otp' ? (
                   <View style={styles.inputGroup}>
-                    <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Full Name</Text>
+                    <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                      6-Digit Confirmation Code
+                    </Text>
                     <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
-                      <MaterialIcons name="person-outline" size={20} color="#9CA3AF" />
+                      <MaterialIcons name="vpn-key" size={20} color="#9CA3AF" />
                       <TextInput
-                        style={[styles.textInput, { color: colors.text }]}
-                        placeholder="e.g. Sanatombi Devi"
+                        style={[styles.textInput, { color: colors.text, fontSize: 18, letterSpacing: 4 }]}
+                        placeholder="123456"
                         placeholderTextColor="#9CA3AF"
-                        value={fullName}
-                        onChangeText={setFullName}
-                        autoCapitalize="words"
+                        value={otpCode}
+                        onChangeText={setOtpCode}
+                        keyboardType="number-pad"
+                        maxLength={8}
+                        autoFocus
                       />
                     </View>
+                    <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 6, lineHeight: 16 }}>
+                      You can also click the confirmation link in your Gmail, then return here to sign in.
+                    </Text>
                   </View>
-                )}
+                ) : (
+                  <>
+                    {mode === 'signup' && (
+                      <View style={styles.inputGroup}>
+                        <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Full Name</Text>
+                        <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
+                          <MaterialIcons name="person-outline" size={20} color="#9CA3AF" />
+                          <TextInput
+                            style={[styles.textInput, { color: colors.text }]}
+                            placeholder="e.g. Sanatombi Devi"
+                            placeholderTextColor="#9CA3AF"
+                            value={fullName}
+                            onChangeText={setFullName}
+                            autoCapitalize="words"
+                          />
+                        </View>
+                      </View>
+                    )}
 
-                <View style={styles.inputGroup}>
-                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Email Address</Text>
-                  <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
-                    <MaterialIcons name="mail-outline" size={20} color="#9CA3AF" />
-                    <TextInput
-                      style={[styles.textInput, { color: colors.text }]}
-                      placeholder="explorer@example.com"
-                      placeholderTextColor="#9CA3AF"
-                      value={email}
-                      onChangeText={setEmail}
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                  </View>
-                </View>
-
-                {mode !== 'forgot_password' && (
-                  <View style={styles.inputGroup}>
-                    <View style={styles.labelRow}>
-                      <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Password</Text>
-                      {mode === 'login' && (
-                        <TouchableOpacity
-                          onPress={() => {
-                            setMode('forgot_password');
-                            setErrorMessage(null);
-                            setSuccessMessage(null);
-                          }}
-                        >
-                          <Text style={styles.forgotLink}>Forgot Password?</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
-                      <MaterialIcons name="lock-outline" size={20} color="#9CA3AF" />
-                      <TextInput
-                        style={[styles.textInput, { color: colors.text }]}
-                        placeholder="••••••••"
-                        placeholderTextColor="#9CA3AF"
-                        value={password}
-                        onChangeText={setPassword}
-                        secureTextEntry={!showPassword}
-                        autoCapitalize="none"
-                      />
-                      <TouchableOpacity onPress={() => setShowPassword(prev => !prev)}>
-                        <MaterialIcons
-                          name={showPassword ? 'visibility-off' : 'visibility'}
-                          size={20}
-                          color="#9CA3AF"
+                    <View style={styles.inputGroup}>
+                      <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Email Address</Text>
+                      <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
+                        <MaterialIcons name="mail-outline" size={20} color="#9CA3AF" />
+                        <TextInput
+                          style={[styles.textInput, { color: colors.text }]}
+                          placeholder="explorer@example.com"
+                          placeholderTextColor="#9CA3AF"
+                          value={email}
+                          onChangeText={setEmail}
+                          keyboardType="email-address"
+                          autoCapitalize="none"
+                          autoCorrect={false}
                         />
-                      </TouchableOpacity>
+                      </View>
                     </View>
-                  </View>
-                )}
 
-                {mode === 'signup' && (
-                  <View style={styles.inputGroup}>
-                    <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Confirm Password</Text>
-                    <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
-                      <MaterialIcons name="lock-outline" size={20} color="#9CA3AF" />
-                      <TextInput
-                        style={[styles.textInput, { color: colors.text }]}
-                        placeholder="••••••••"
-                        placeholderTextColor="#9CA3AF"
-                        value={confirmPassword}
-                        onChangeText={setConfirmPassword}
-                        secureTextEntry={!showPassword}
-                        autoCapitalize="none"
-                      />
-                    </View>
-                  </View>
+                    {mode !== 'forgot_password' && (
+                      <View style={styles.inputGroup}>
+                        <View style={styles.labelRow}>
+                          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Password</Text>
+                          {mode === 'login' && (
+                            <TouchableOpacity
+                              onPress={() => {
+                                setMode('forgot_password');
+                                setErrorMessage(null);
+                                setSuccessMessage(null);
+                              }}
+                            >
+                              <Text style={styles.forgotLink}>Forgot Password?</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                        <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
+                          <MaterialIcons name="lock-outline" size={20} color="#9CA3AF" />
+                          <TextInput
+                            style={[styles.textInput, { color: colors.text }]}
+                            placeholder="••••••••"
+                            placeholderTextColor="#9CA3AF"
+                            value={password}
+                            onChangeText={setPassword}
+                            secureTextEntry={!showPassword}
+                            autoCapitalize="none"
+                          />
+                          <TouchableOpacity onPress={() => setShowPassword(prev => !prev)}>
+                            <MaterialIcons
+                              name={showPassword ? 'visibility-off' : 'visibility'}
+                              size={20}
+                              color="#9CA3AF"
+                            />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+
+                    {mode === 'signup' && (
+                      <View style={styles.inputGroup}>
+                        <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Confirm Password</Text>
+                        <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
+                          <MaterialIcons name="lock-outline" size={20} color="#9CA3AF" />
+                          <TextInput
+                            style={[styles.textInput, { color: colors.text }]}
+                            placeholder="••••••••"
+                            placeholderTextColor="#9CA3AF"
+                            value={confirmPassword}
+                            onChangeText={setConfirmPassword}
+                            secureTextEntry={!showPassword}
+                            autoCapitalize="none"
+                          />
+                        </View>
+                      </View>
+                    )}
+                  </>
                 )}
               </View>
 
@@ -344,6 +410,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       ? 'Sign In to MEERUP'
                       : mode === 'signup'
                       ? 'Create Explorer Account'
+                      : mode === 'verify_otp'
+                      ? 'Verify Code & Sign In'
                       : 'Send Reset Link'}
                   </Text>
                 )}

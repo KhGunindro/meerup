@@ -26,20 +26,6 @@ export type AudioGuide = {
   languages: AudioLanguage[];
 };
 
-export type ArHotspot = {
-  title: string;
-  desc: string;
-};
-
-export type ArExperience = {
-  title: string;
-  subtitle: string;
-  badge: string;
-  modelName: string;
-  arFeatures: string[];
-  hotspots: ArHotspot[];
-};
-
 export type Destination = {
   id: string;
   name: string;
@@ -57,7 +43,6 @@ export type Destination = {
   lat: number;
   lng: number;
   audioGuide?: AudioGuide;
-  arExperience?: ArExperience;
   highlights?: HighlightItem[];
   practicalInfo?: PracticalInfo;
   aiPrompts?: string[];
@@ -99,18 +84,6 @@ export const DESTINATIONS: Destination[] = [
           label: 'ꯃৈতৈꯂꯣꯟ (Manipuri)',
           text: 'ꯀꯡꯂꯥ ꯐꯣꯔ꯭ꯠꯇ ꯊꯥꯒꯠꯂꯤ, ꯁꯤ. ꯏ. 33ꯗꯒꯤ ꯍꯧꯅ ꯃꯅꯤꯄꯨꯔꯒꯤ ꯔꯥꯖ꯭ꯌꯒꯤ ꯊꯝꯃꯣꯏꯒꯤ ꯈꯣꯡꯖꯦꯜ꯫ ꯁꯦꯡꯂꯕ ꯂꯝꯕꯤ ꯑꯁꯤ ꯉꯥꯛꯁꯦꯟꯗꯨꯅ ꯑꯆꯧꯕ ꯀꯪꯂꯥ ꯁꯥ ꯗ꯭ꯔꯦꯒꯟ - ꯅꯣꯡꯁꯥꯒꯤ ꯃꯤꯇꯝꯁꯤꯡ ꯂꯩ, ꯅꯤꯡꯊꯧꯖꯥ ꯔꯥꯖꯀꯤ ꯑꯣꯏꯕ ꯁꯣꯚꯔꯦꯟꯇꯤꯒꯤ ꯁꯤꯕ ꯅꯥꯏꯗꯕ ꯈꯨꯗꯝꯁꯤꯡ꯫ ꯑꯩꯈꯣꯏꯅ ꯀꯣꯔꯣꯅꯦꯁꯟ ꯃꯨꯟ, ꯔꯣꯌꯦꯜ ꯐꯨꯝꯐꯝ, ꯑꯃꯁꯨꯡ ꯑꯔꯤꯕ ꯏꯝꯐꯥꯜꯒꯤ ꯂꯩꯅꯨꯡꯒꯤ ꯏꯁꯤꯡꯒꯤ ꯂꯣꯠꯁꯤꯜꯂꯕ ꯂꯧꯁꯤꯡ ꯑꯗꯨ ꯐꯣꯡꯗꯣꯛꯄ ꯃꯇꯝꯗ ꯅꯛꯅ ꯇꯥꯕꯤꯌꯨ꯫',
         },
-      ],
-    },
-    arExperience: {
-      title: 'Kangla Sha Guardian Dragon in 3D AR',
-      subtitle: 'Spawn the mythical dragon guardian of Manipur in life-size 3D augmented reality',
-      badge: 'Interactive 3D AR',
-      modelName: 'Kangla Sha (Royal Dragon-Lion Guardian)',
-      arFeatures: ['360° Gyro Inspection', 'True-to-Scale Projection', 'Sacred Lore Hotspots'],
-      hotspots: [
-        { title: 'Dragon Horn & Mane', desc: 'Symbolizes direct descent from celestial Ningthouja monarchs.' },
-        { title: 'Sacred Pedestal', desc: 'Restored on the exact coronation meridian of ancient Imphal kings.' },
-        { title: 'Dragon Scales', desc: 'Carved with Meitei heraldic motifs dating back two millennia.' },
       ],
     },
     highlights: [
@@ -169,18 +142,6 @@ export const DESTINATIONS: Destination[] = [
         },
       ],
     },
-    arExperience: {
-      title: 'Sangai Deer & Phumdi in 3D AR',
-      subtitle: 'Inspect the endangered dancing deer and floating phumdi ecosystem in augmented reality',
-      badge: 'Ecosystem 3D AR',
-      modelName: 'Sangai (Brow-Antlered Dancing Deer)',
-      arFeatures: ['Life-Size Spatial Projection', '360° Habitat Walkaround', 'Nature Audio Sync'],
-      hotspots: [
-        { title: 'Crown Brow-Antlers', desc: 'Majestic backward-curving antlers unique to the dancing Sangai.' },
-        { title: 'Adapted Phumdi Hooves', desc: 'Broad, elastic hooves evolved specifically to balance on floating biomass.' },
-        { title: 'Living Phumdi Matrix', desc: 'Thick mat of soil, vegetation, and organic roots floating on clear water.' },
-      ],
-    },
     highlights: [
       { title: 'Sendra Island Lookout', desc: 'Elevated panoramic viewpoint overlooking the concentric phumdi rings.' },
       { title: 'Keibul Lamjao Sanctuary', desc: 'The world’s only floating national park sheltering the endangered wild Sangai.' },
@@ -235,18 +196,6 @@ export const DESTINATIONS: Destination[] = [
           label: 'ꯃৈতৈꯂꯣꯟ (Manipuri)',
           text: 'ꯃꯃꯥꯁꯤꯡꯒꯤ ꯀꯩꯊꯦꯜ ꯑꯣꯏꯔꯤꯕ ꯏꯃꯥ ꯀꯦꯊꯦꯜꯒꯤ ꯃꯅꯨꯡꯗ ꯆꯪꯁꯤꯜꯂꯨ꯫ ꯆꯍꯤ 500 ꯍꯦꯟꯅ, ꯃꯁꯤꯒꯤ ꯆꯣꯠ - ꯆꯣꯠ ꯂꯥꯎꯕ ꯂꯂꯣꯟ - ꯏꯇꯤꯛ ꯇꯧꯕ ꯐꯣꯔꯠꯔꯦꯁ ꯑꯁꯤ ꯂꯨꯍꯣꯡꯂꯕ ꯃꯦꯏꯇꯦꯏ ꯅꯨꯄꯤꯁꯤꯡꯈꯛꯇꯅ ꯁꯦꯝꯒꯠ - ꯁꯥꯒꯠꯂꯤ꯫ ꯀꯣꯂꯣꯅꯤꯌꯦꯜ ꯃꯣꯅꯣꯄꯣꯂꯤꯁꯤꯡꯒꯤ ꯃꯥꯌꯣꯛꯇ ꯄꯨꯋꯥꯔꯤ ꯑꯣꯏꯔꯕ ꯅꯨꯄꯤ ꯂꯥꯜ ꯂꯥꯟꯊꯦꯡꯅꯕꯒꯤ ꯂꯝꯕꯤ ꯌꯥꯠꯄꯗꯒꯤ ꯍꯧꯅ ꯃꯤꯔꯣꯜ ꯀꯌꯥꯗ ꯂꯧꯁꯤꯡ ꯂꯩꯕ ꯁꯥ - ꯁꯟ ꯇꯧꯕꯒꯤ ꯍꯩꯁꯤꯡꯕ ꯄꯤꯕ ꯐꯥꯎꯕ, ꯃꯃꯥ 5,000 ꯑꯁꯤ ꯃꯅꯤꯄꯨꯔꯒꯤ ꯌꯨꯝꯕꯤꯅꯤ꯫',
         },
-      ],
-    },
-    arExperience: {
-      title: 'Meitei Handloom & Textile Loom in AR',
-      subtitle: 'Examine authentic Meitei wooden shuttle looms and intricate Phanek patterns in 3D',
-      badge: 'Heritage Craft AR',
-      modelName: 'Traditional Meitei Handloom Loom',
-      arFeatures: ['Weaving Loom Demonstration', 'Textile Texture Zoom', 'Yarn Dye Inspector'],
-      hotspots: [
-        { title: 'Mayek Naibi Border', desc: 'Ancestral horizontal stripe motifs woven exclusively with royal Meitei geometry.' },
-        { title: 'Innaphi Gossamer Silk', desc: 'Featherlight diaphanous shawl adorned with intricate floral threadwork.' },
-        { title: 'Hereditary Stall (Pham)', desc: 'Sacred vendor space inherited from mother to daughter across generations.' },
       ],
     },
     highlights: [
@@ -305,18 +254,6 @@ export const DESTINATIONS: Destination[] = [
         },
       ],
     },
-    arExperience: {
-      title: 'Classical Raas Leela Dancer in 3D AR',
-      subtitle: 'View a life-size 3D classical Manipuri dancer wearing the ornate Potloi cylindrical skirt in AR',
-      badge: 'Classical Dance AR',
-      modelName: 'Manipuri Raas Leela Potloi Costume',
-      arFeatures: ['Ornate Mirrorwork Shader', '360° Costume Details', 'Classical Pung Drum Audio'],
-      hotspots: [
-        { title: 'Stiffened Potloi Skirt', desc: 'Embroidered cylindrical skirt encrusted with mirrors, gold sequins, and silk.' },
-        { title: 'Feathered Chura Headdress', desc: 'Sacred crown representing Lord Krishna adorned with delicate peacock plumes.' },
-        { title: 'Graceful Tandava & Lasya Pose', desc: 'Classical fluid movements celebrated across international dance traditions.' },
-      ],
-    },
     highlights: [
       { title: 'Twin Golden Domes', desc: 'Gilded temple towers reflecting the morning valley sunlight over Imphal.' },
       { title: 'Mandapa Nat Sankirtan Courtyard', desc: 'Open pillared hall where devotional cymbals and pung drums reverberate.' },
@@ -373,18 +310,6 @@ export const DESTINATIONS: Destination[] = [
         },
       ],
     },
-    arExperience: {
-      title: 'Thang-Ta Martial Arts Weapons in 3D AR',
-      subtitle: 'Inspect the sacred Meitei curved sword (Thang) and spear (Ta) in interactive 3D AR',
-      badge: 'Martial Arts AR',
-      modelName: 'Meitei Thang-Ta Ceremonial Blades',
-      arFeatures: ['Dynamic Motion Trails', 'Steel Reflection Map', 'Combat Stance Audio'],
-      hotspots: [
-        { title: 'Curved Thang Blade', desc: 'Double-edged steel blade perfected over centuries of valley defense.' },
-        { title: 'Woven Bamboo Shield (Chung)', desc: 'Hardened lacquered shield bearing clan protective sigils.' },
-        { title: 'Ceremonial Ta Spear', desc: 'Long-reach spear wielded in sacred ritual choreography and martial duels.' },
-      ],
-    },
     highlights: [
       { title: 'Main Amphitheatre Performances', desc: 'Continuous classical Raas Leela, Lai Haraoba, and Naga tribal dances.' },
       { title: 'Thang-Ta Arena', desc: 'Breathtaking demonstrations of ancient Meitei sword and spear combat.' },
@@ -439,18 +364,6 @@ export const DESTINATIONS: Destination[] = [
           label: 'ꯃৈতৈꯂꯣꯟ (Manipuri)',
           text: 'ꯃꯦꯏꯇꯦꯒꯤ ꯅꯥꯠꯇ, ꯆꯤꯟꯖꯥꯛ ꯑꯁꯤ ꯃꯇꯝ ꯄꯨꯝꯅꯃꯛꯇ ꯍꯤꯡꯅꯕꯒꯤ ꯄꯥꝝꯕꯩꯈꯛꯇꯃꯛ ꯑꯣꯏꯗꯦ - ꯃꯁꯤ ꯍꯤꯗꯥꯛ - ꯂꯥꯡꯊꯛꯀꯤ ꯍꯤꯗꯥꯛ ꯑꯃꯁꯨꯡ ꯂꯥꯏꯅꯤꯡ - ꯂꯤꯝꯕꯤꯒꯤ ꯑꯣꯏꯕ ꯃꯔꯤ ꯑꯃꯅꯤ꯫ ꯆꯥꯛ - ꯍꯥꯎ, ꯃꯃꯜ ꯌꯥꯝꯂꯕ ꯖꯤ. ꯑꯥꯏ. - ꯇꯦꯒ ꯇꯧꯔꯕ ꯃꯆꯨ ꯁꯪꯕ ꯑꯃꯨꯕ ꯃꯅꯝ ꯅꯨꯡꯁꯤꯕ ꯆꯦꯡ ꯑꯁꯤ, ꯃꯃꯥꯡꯗ ꯔꯣꯌꯦꯜ ꯅꯤꯡꯊꯧ ꯆꯥꯛꯂꯦꯟꯁꯤꯡꯒꯤꯗꯃꯛꯇ ꯈꯥꯛꯇꯨꯅ ꯊꯝꯂꯝꯃꯤ꯫ ꯁꯤꯡꯖꯨꯒꯤ ꯃꯩ ꯆꯥꯛꯄ, ꯎ - ꯋꯥꯒꯤ ꯃꯍꯤꯛ - ꯃꯇꯥꯏ ꯌꯥꯎꯕ ꯀ꯭ꯔꯪꯆꯀ ꯂꯣꯏꯅꯅ ꯌꯥꯟꯁꯤꯜꯂꯒ, ꯃꯁꯤꯅ ꯃꯅꯤꯄꯨꯔꯒꯤ ꯑꯣꯏꯕ ꯑꯈꯟꯅꯕ ꯃꯍꯥꯎꯒꯤ ꯃꯑꯣꯡ ꯑꯃ ꯁꯦꯝꯃꯤ꯫',
         },
-      ],
-    },
-    arExperience: {
-      title: 'Chak-hao Royal Feast in 3D AR',
-      subtitle: 'Project a royal brass Meitei thali with purple Chak-hao kheer and fresh Singju onto your table in 3D',
-      badge: 'Gastronomy AR',
-      modelName: 'Ancestral Meitei Khengkhrong Thali',
-      arFeatures: ['Steam & Texture Shader', 'Ingredient Botanical Inspector', 'Calorie & Herb Breakdown'],
-      hotspots: [
-        { title: 'Chak-hao Anthocyanin Grain', desc: 'Superfood black rice radiating a deep royal violet hue rich in antioxidants.' },
-        { title: 'Fermented Ngari Dressing', desc: 'Aged fermented fish providing the essential savory umami kick to Singju salad.' },
-        { title: 'Fresh Lotus Stem & Herb Medley', desc: 'Crisp lotus root, banana flower, perilla seeds, and fragrant local herbs.' },
       ],
     },
     highlights: [

@@ -19,7 +19,6 @@ import { findDestination } from '@/constants/destinations';
 import { openTurnByTurnNavigation, openLocationPin } from '@/utils/navigation';
 import { useLocation } from '@/hooks/use-location';
 import { AudioGuidePlayer } from '@/components/destination/AudioGuidePlayer';
-import { ArExperienceCard } from '@/components/destination/ArExperienceCard';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const HERO_H = 260;
@@ -147,16 +146,6 @@ export default function DestinationDetail() {
             isDark={isDark}
             destinationName={dest.name}
             destinationId={dest.id}
-          />
-        )}
-
-        {/* ── EXPERIENCE IN AR ─────────────────────── */}
-        {dest.arExperience && (
-          <ArExperienceCard
-            ar={dest.arExperience}
-            destId={dest.id}
-            colors={colors}
-            isDark={isDark}
           />
         )}
 

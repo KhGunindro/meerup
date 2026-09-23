@@ -23,15 +23,61 @@ const FILTERS = ['All', 'Sacred Sites', 'Nature', 'Markets', 'Food', 'Festivals'
 type Filter = typeof FILTERS[number];
 
 
+import { useAuth } from '@/context/AuthContext';
+import { useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { toggleSavePlace } from '@/utils/savePlace';
+import { SavedPlaceRecord } from '@/utils/supabase';
+
 export default function ExploreScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const isDark = scheme === 'dark';
   const router = useRouter();
   const { location, getFormattedDistance } = useLocation();
+  const { user } = useAuth();
 
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
   const [searchText, setSearchText] = useState('');
+  const [savedPlaceNames, setSavedPlaceNames] = useState<Set<string>>(new Set());
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const loadSaved = async () => {
+        try {
+          const currentUserId = user?.id || 'guest_user';
+          const placeUserKey = `@meerup_saved_places_${currentUserId}`;
+          const placeGlobalKey = `@meerup_saved_places_all`;
+          const [rawUser, rawGlobal] = await Promise.all([
+            AsyncStorage.getItem(placeUserKey),
+            AsyncStorage.getItem(placeGlobalKey),
+          ]);
+          
+          const pUser = rawUser ? JSON.parse(rawUser) : [];
+          const pGlobal = rawGlobal ? JSON.parse(rawGlobal) : [];
+          
+          const listUser: SavedPlaceRecord[] = Array.isArray(pUser) ? pUser : [];
+          const listGlobal: SavedPlaceRecord[] = Array.isArray(pGlobal) ? pGlobal : [];
+          
+          const names = new Set([...listUser, ...listGlobal].map(p => p.place_name));
+          setSavedPlaceNames(names);
+        } catch {
+          // silent
+        }
+      };
+      loadSaved();
+    }, [user])
+  );
+
+  const handleToggleSave = async (dest: any) => {
+    const isNowSaved = await toggleSavePlace(user?.id || null, dest);
+    setSavedPlaceNames(prev => {
+      const next = new Set(prev);
+      if (isNowSaved) next.add(dest.name);
+      else next.delete(dest.name);
+      return next;
+    });
+  };
 
   const filtered = DESTINATIONS.filter((d) => {
     const matchesFilter = activeFilter === 'All' || d.category === activeFilter;
@@ -118,8 +164,15 @@ export default function ExploreScreen() {
                   <Text style={styles.destBadgeText}>{dest.badge}</Text>
                 </View>
                 {/* Bookmark */}
-                <TouchableOpacity style={[styles.bookmarkBtn, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
-                  <Ionicons name="bookmark-outline" size={14} color={colors.text} />
+                <TouchableOpacity 
+                  style={[styles.bookmarkBtn, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}
+                  onPress={() => handleToggleSave(dest)}
+                >
+                  <Ionicons 
+                    name={savedPlaceNames.has(dest.name) ? "bookmark" : "bookmark-outline"} 
+                    size={14} 
+                    color={savedPlaceNames.has(dest.name) ? colors.accent : colors.text} 
+                  />
                 </TouchableOpacity>
               </View>
 

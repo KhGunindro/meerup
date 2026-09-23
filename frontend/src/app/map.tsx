@@ -12,6 +12,11 @@ import {
   Alert,
   useColorScheme,
   Dimensions,
+  LayoutAnimation,
+  PanResponder,
+  Animated,
+  Easing,
+  UIManager,
 } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -36,8 +41,13 @@ import {
   launchExternalNavigationApp,
 } from '@/utils/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { supabase } from '@/utils/supabase';
+import { supabase, TripRecord, SavedPlaceRecord } from '@/utils/supabase';
 import { AuthModal } from '@/components/auth/AuthModal';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 interface MapDestination {
   id: string;
@@ -76,6 +86,40 @@ export default function MapScreen() {
   // User GPS Location
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number }>(DEFAULT_ORIGIN);
   const [isLocating, setIsLocating] = useState(true);
+
+  // Bottom Sheet Collapse State & Animation
+  const [isSheetCollapsed, setIsSheetCollapsed] = useState(false);
+  const collapseAnim = useRef(new Animated.Value(0)).current; // 0 = expanded, 1 = collapsed
+
+  const toggleSheet = (targetState?: boolean) => {
+    const nextState = typeof targetState === 'boolean' ? targetState : !isSheetCollapsed;
+    setIsSheetCollapsed(nextState);
+
+    Animated.timing(collapseAnim, {
+      toValue: nextState ? 1 : 0,
+      duration: 320,
+      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+      useNativeDriver: false,
+    }).start();
+  };
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 8,
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dy > 20) {
+            // Dragged downwards -> close/collapse
+            toggleSheet(true);
+          } else if (gesture.dy < -20) {
+            // Dragged upwards -> expand
+            toggleSheet(false);
+          }
+        },
+      }),
+    [isSheetCollapsed]
+  );
 
   // Selected Destination
   const [selectedDest, setSelectedDest] = useState<MapDestination>(() => {
@@ -120,6 +164,34 @@ export default function MapScreen() {
       setTripSaved(false);
     }
   }, [params.destLat, params.destLng, params.destName]);
+
+  // Sync saved state with local storage for currently selected destination
+  useEffect(() => {
+    let isMounted = true;
+    const checkIfSaved = async () => {
+      try {
+        const currentUserId = user?.id || 'guest_user';
+        const placeUserKey = `@meerup_saved_places_${currentUserId}`;
+        const placeGlobalKey = `@meerup_saved_places_all`;
+        const [rawUser, rawGlobal] = await Promise.all([
+          AsyncStorage.getItem(placeUserKey),
+          AsyncStorage.getItem(placeGlobalKey),
+        ]);
+        const listUser: SavedPlaceRecord[] = rawUser ? JSON.parse(rawUser) : [];
+        const listGlobal: SavedPlaceRecord[] = rawGlobal ? JSON.parse(rawGlobal) : [];
+        const isSaved = [...listUser, ...listGlobal].some((p) => p.place_name === selectedDest.name);
+        if (isMounted) {
+          setTripSaved(isSaved);
+        }
+      } catch {
+        // silent
+      }
+    };
+    checkIfSaved();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedDest.name, user]);
 
   // Request high-accuracy GPS location
   useEffect(() => {
@@ -361,7 +433,7 @@ export default function MapScreen() {
     }
   }, [nativeRouteCoords]);
 
-  // Save Route to Supabase Trips
+  // Save Route & Place to Supabase and Local Storage
   const handleSaveRoute = async () => {
     if (!user) {
       setAuthModalVisible(true);
@@ -370,7 +442,11 @@ export default function MapScreen() {
 
     try {
       setIsSavingTrip(true);
-      const { error } = await supabase.from('trips').insert({
+      const currentUserId = user?.id || 'guest_user';
+
+      // 1. Prepare Trip Record
+      const newTrip: TripRecord = {
+        id: `trip_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         user_id: user.id,
         destination_name: selectedDest.name,
         origin_lat: userLocation.lat,
@@ -381,16 +457,82 @@ export default function MapScreen() {
         estimated_duration_minutes: carEta,
         status: 'saved',
         route_summary: `Fastest route to ${selectedDest.name} (${distanceKm.toFixed(1)} km)`,
-      });
+        created_at: new Date().toISOString(),
+      };
 
-      if (!error) {
-        setTripSaved(true);
-        Alert.alert('Route Saved!', `Your route to ${selectedDest.name} is saved to your profile.`);
-      } else {
-        Alert.alert('Save Failed', error.message);
+      // 2. Prepare Saved Place Record
+      const newPlace: SavedPlaceRecord = {
+        id: `place_${selectedDest.id || Date.now()}`,
+        user_id: user.id,
+        place_name: selectedDest.name,
+        latitude: selectedDest.lat,
+        longitude: selectedDest.lng,
+        category: selectedDest.category || 'Destination',
+        created_at: new Date().toISOString(),
+      };
+
+      // 3. ALWAYS persist both immediately to local storage so nothing is lost
+      const tripUserKey = `@meerup_saved_trips_${currentUserId}`;
+      const tripGlobalKey = `@meerup_saved_trips_all`;
+      const placeUserKey = `@meerup_saved_places_${currentUserId}`;
+      const placeGlobalKey = `@meerup_saved_places_all`;
+
+      try {
+        // Save trip
+        const existingTripsRaw = await AsyncStorage.getItem(tripUserKey);
+        const parsedTrips = existingTripsRaw ? JSON.parse(existingTripsRaw) : [];
+        const existingTrips: TripRecord[] = Array.isArray(parsedTrips) ? parsedTrips : [];
+        const updatedTrips = [newTrip, ...existingTrips.filter((t) => t.destination_name !== selectedDest.name)].slice(0, 30);
+        await AsyncStorage.setItem(tripUserKey, JSON.stringify(updatedTrips));
+        await AsyncStorage.setItem(tripGlobalKey, JSON.stringify(updatedTrips));
+
+        // Save place
+        const existingPlacesRaw = await AsyncStorage.getItem(placeUserKey);
+        const parsedPlaces = existingPlacesRaw ? JSON.parse(existingPlacesRaw) : [];
+        const existingPlaces: SavedPlaceRecord[] = Array.isArray(parsedPlaces) ? parsedPlaces : [];
+        const updatedPlaces = [newPlace, ...existingPlaces.filter((p) => p.place_name !== selectedDest.name)].slice(0, 30);
+        await AsyncStorage.setItem(placeUserKey, JSON.stringify(updatedPlaces));
+        await AsyncStorage.setItem(placeGlobalKey, JSON.stringify(updatedPlaces));
+      } catch (e) {
+        console.log('Local storage save notice:', e);
       }
+
+      // 4. Attempt cloud sync with Supabase in the background
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const activeUserId = session?.user?.id || user.id;
+
+        await supabase.from('trips').insert({
+          user_id: activeUserId,
+          destination_name: selectedDest.name,
+          origin_lat: userLocation.lat,
+          origin_lng: userLocation.lng,
+          dest_lat: selectedDest.lat,
+          dest_lng: selectedDest.lng,
+          distance_km: parseFloat(distanceKm.toFixed(2)),
+          estimated_duration_minutes: carEta,
+          status: 'saved',
+          route_summary: `Fastest route to ${selectedDest.name} (${distanceKm.toFixed(1)} km)`,
+        });
+
+        await supabase.from('saved_places').insert({
+          user_id: activeUserId,
+          place_name: selectedDest.name,
+          latitude: selectedDest.lat,
+          longitude: selectedDest.lng,
+          category: selectedDest.category || 'Destination',
+        });
+      } catch (cloudErr) {
+        console.log('Supabase cloud sync notice (saved locally):', cloudErr);
+      }
+
+      setTripSaved(true);
+      Alert.alert(
+        'Saved to Profile!',
+        `"${selectedDest.name}" has been saved to your Saved Places and Routes.`
+      );
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Could not save trip');
+      Alert.alert('Save Failed', err?.message || 'Could not save place');
     } finally {
       setIsSavingTrip(false);
     }
@@ -567,112 +709,167 @@ export default function MapScreen() {
         style={[
           styles.bottomSheet,
           {
-            paddingBottom: Math.max(insets.bottom, 16) + 12,
+            paddingBottom: Math.max(insets.bottom, 16) + (isSheetCollapsed ? 4 : 12),
             backgroundColor: isDark ? '#111827' : '#FFFFFF',
           },
         ]}
       >
-        {/* Drag handle */}
-        <View style={styles.dragHandle} />
-
-        {/* Live Status Row */}
-        <View style={styles.statusRow}>
-          <View style={styles.livePulseDot} />
-          <Text style={styles.statusBadgeText}>LIVE GPS ROUTE</Text>
-          {isLocating && (
-            <ActivityIndicator size="small" color="#4777c2" style={{ marginLeft: 6 }} />
-          )}
-        </View>
-
-        {/* Main ETA Header (Bold Blue) */}
-        <View style={styles.etaRow}>
-          <Ionicons name="car" size={28} color="#4777c2" />
-          <Text style={styles.etaBoldText}>{carEta} MINS</Text>
-          <Ionicons name="bicycle" size={30} color="#4777c2" style={{ marginLeft: 4 }} />
-          <Text style={styles.etaBoldText}>{bikeEta} MINS</Text>
-          <Text style={[styles.etaDotSeparator, { color: colors.textSecondary }]}>•</Text>
-          <Text style={[styles.distanceBoldText, { color: colors.text }]}>
-            {distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`}
-          </Text>
-        </View>
-
-        <Text style={[styles.routeSubtitle, { color: colors.textSecondary }]}>
-          Fastest route to destination • Blue path highlighted on map
-        </Text>
-
-        {/* Destination Card Row */}
-        <View
-          style={[
-            styles.destCardPreview,
-            { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border },
-          ]}
-        >
-          <Image
-            source={getDestImg(selectedDest.id)}
-            style={styles.destThumb}
-            resizeMode="cover"
-          />
-          <View style={styles.destMetaCol}>
-            <Text style={[styles.destCardTitle, { color: colors.text }]} numberOfLines={1}>
-              {selectedDest.name}
-            </Text>
-            <Text style={[styles.destCardCategory, { color: colors.textSecondary }]} numberOfLines={1}>
-              {selectedDest.category} • Manipur
-            </Text>
-          </View>
-          <View style={styles.destTagPill}>
-            <MaterialIcons name="navigation" size={12} color="#4777c2" />
-            <Text style={styles.destTagText}>Target</Text>
-          </View>
-        </View>
-
-        {/* Swiggy Action Buttons */}
-        <View style={styles.actionRow}>
+        {/* Drag handle with PanResponder and Tap toggle */}
+        <View {...panResponder.panHandlers}>
           <TouchableOpacity
-            style={styles.primaryNavigateBtn}
-            onPress={handleStartVoiceGps}
+            style={styles.dragHandleTouch}
+            onPress={() => toggleSheet()}
+            activeOpacity={0.7}
+            accessibilityLabel={isSheetCollapsed ? "Expand route panel" : "Close route panel"}
           >
-            <MaterialIcons name="directions" size={18} color="#FFFFFF" />
-            <Text style={styles.primaryNavigateText}>Start Voice GPS</Text>
+            <View style={styles.dragHandle} />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[
-              styles.secondaryBtn,
-              tripSaved && styles.savedBtnActive,
-              { borderColor: colors.border },
-            ]}
-            onPress={handleSaveRoute}
-            disabled={isSavingTrip}
-          >
-            {isSavingTrip ? (
-              <ActivityIndicator size="small" color="#4777c2" />
-            ) : (
-              <>
-                <MaterialIcons
-                  name={tripSaved ? 'bookmark' : 'bookmark-border'}
-                  size={18}
-                  color={tripSaved ? '#047857' : '#4777c2'}
+          {/* Live Status Row with Close / Expand Toggle */}
+          <View style={styles.statusRow}>
+            <View style={styles.statusBadgeCol}>
+              <View style={styles.livePulseDot} />
+              <Text style={styles.statusBadgeText}>LIVE GPS ROUTE</Text>
+              {isLocating && (
+                <ActivityIndicator size="small" color="#4777c2" style={{ marginLeft: 6 }} />
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.collapseToggleBtn, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}
+              onPress={() => toggleSheet()}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Animated.View
+                style={{
+                  transform: [
+                    {
+                      rotate: collapseAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['0deg', '180deg'],
+                      }),
+                    },
+                  ],
+                }}
+              >
+                <Ionicons
+                  name="chevron-down"
+                  size={16}
+                  color={colors.textSecondary}
                 />
-                <Text
-                  style={[
-                    styles.secondaryBtnText,
-                    tripSaved && { color: '#047857' },
-                  ]}
-                >
-                  {tripSaved ? 'Saved' : 'Save'}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
+              </Animated.View>
+              <Text style={[styles.collapseToggleText, { color: colors.textSecondary }]}>
+                {isSheetCollapsed ? 'Expand' : 'Close'}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-          <TouchableOpacity
-            style={[styles.iconActionBtn, { borderColor: colors.border }]}
-            onPress={handleShareEta}
-          >
-            <MaterialIcons name="share" size={18} color="#4B5563" />
-          </TouchableOpacity>
+          {/* Main ETA Header (Bold Blue, reduced balanced size) */}
+          <View style={styles.etaRow}>
+            <Ionicons name="car" size={20} color="#4777c2" />
+            <Text style={styles.etaBoldText}>{carEta} MINS</Text>
+            <Ionicons name="bicycle" size={22} color="#4777c2" style={{ marginLeft: 4 }} />
+            <Text style={styles.etaBoldText}>{bikeEta} MINS</Text>
+            <Text style={[styles.etaDotSeparator, { color: colors.textSecondary }]}>•</Text>
+            <Text style={[styles.distanceBoldText, { color: colors.text }]}>
+              {distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`}
+            </Text>
+          </View>
         </View>
+
+        {/* Collapsible Section with Butter-Smooth Height & Opacity Transition */}
+        <Animated.View
+          style={{
+            maxHeight: collapseAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [320, 0],
+            }),
+            opacity: collapseAnim.interpolate({
+              inputRange: [0, 0.4, 1],
+              outputRange: [1, 0, 0],
+            }),
+            overflow: 'hidden',
+          }}
+        >
+          <Text style={[styles.routeSubtitle, { color: colors.textSecondary }]}>
+            Fastest route to destination • Blue path highlighted on map
+          </Text>
+
+          {/* Destination Card Row */}
+          <View
+            style={[
+              styles.destCardPreview,
+              { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border },
+            ]}
+          >
+            <Image
+              source={getDestImg(selectedDest.id)}
+              style={styles.destThumb}
+              resizeMode="cover"
+            />
+            <View style={styles.destMetaCol}>
+              <Text style={[styles.destCardTitle, { color: colors.text }]} numberOfLines={1}>
+                {selectedDest.name}
+              </Text>
+              <Text style={[styles.destCardCategory, { color: colors.textSecondary }]} numberOfLines={1}>
+                {selectedDest.category} • Manipur
+              </Text>
+            </View>
+            <View style={styles.destTagPill}>
+              <MaterialIcons name="navigation" size={12} color="#4777c2" />
+              <Text style={styles.destTagText}>Target</Text>
+            </View>
+          </View>
+
+          {/* Swiggy Action Buttons */}
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={styles.primaryNavigateBtn}
+              onPress={handleStartVoiceGps}
+            >
+              <MaterialIcons name="directions" size={18} color="#FFFFFF" />
+              <Text style={styles.primaryNavigateText}>Start Voice GPS</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.secondaryBtn,
+                tripSaved && styles.savedBtnActive,
+                { borderColor: colors.border },
+              ]}
+              onPress={handleSaveRoute}
+              disabled={isSavingTrip}
+            >
+              {isSavingTrip ? (
+                <ActivityIndicator size="small" color="#4777c2" />
+              ) : (
+                <>
+                  <MaterialIcons
+                    name={tripSaved ? 'bookmark' : 'bookmark-border'}
+                    size={18}
+                    color={tripSaved ? '#047857' : '#4777c2'}
+                  />
+                  <Text
+                    style={[
+                      styles.secondaryBtnText,
+                      tripSaved && { color: '#047857' },
+                    ]}
+                  >
+                    {tripSaved ? 'Saved' : 'Save'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.iconActionBtn, { borderColor: colors.border }]}
+              onPress={handleShareEta}
+            >
+              <MaterialIcons name="share" size={18} color="#4B5563" />
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
       </View>
 
       {/* Auth Modal (if user saves route while logged out) */}
@@ -779,19 +976,30 @@ const styles = StyleSheet.create({
     elevation: 10,
     zIndex: 30,
   },
+  dragHandleTouch: {
+    paddingVertical: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
   dragHandle: {
     width: 38,
     height: 4.5,
     borderRadius: 3,
     backgroundColor: '#D1D5DB',
     alignSelf: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
     marginBottom: 6,
+  },
+  statusBadgeCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   livePulseDot: {
     width: 8,
@@ -805,24 +1013,37 @@ const styles = StyleSheet.create({
     color: '#059669',
     letterSpacing: 0.8,
   },
+  collapseToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  collapseToggleText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
   etaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 2,
+    gap: 6,
+    marginBottom: 4,
+    flexWrap: 'wrap',
   },
   etaBoldText: {
-    fontSize: 28,
-    fontWeight: '900',
+    fontSize: 18,
+    fontWeight: '800',
     color: '#4777c2', // Swiggy-style blue accent
     letterSpacing: 0.2,
   },
   etaDotSeparator: {
-    fontSize: 20,
+    fontSize: 14,
     fontWeight: '700',
   },
   distanceBoldText: {
-    fontSize: 20,
+    fontSize: 15,
     fontWeight: '700',
   },
   routeSubtitle: {

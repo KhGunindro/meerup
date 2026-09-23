@@ -78,38 +78,47 @@ export function TopNavBar() {
             <Text style={[styles.translateBtnText, { color: colors.primary }]}>Translate</Text>
           </Pressable>
 
-          <Pressable
-            onPress={handleAvatarPress}
-            style={({ pressed }) => [
-              styles.avatarPressable,
-              pressed && styles.pressed,
-            ]}
-            accessibilityLabel="Open user profile"
-            accessibilityRole="button">
-            <View
-              style={[
-                styles.avatarRing,
-                user
-                  ? {
-                      backgroundColor: '#047857',
-                      borderColor: isDark ? '#05966980' : '#A7F3D0',
-                    }
-                  : {
-                      backgroundColor: isDark ? '#1F2937' : '#E5E7EB',
-                      borderColor: colors.border,
-                    },
+          {user ? (
+            <Pressable
+              onPress={handleAvatarPress}
+              style={({ pressed }) => [
+                styles.avatarPressable,
+                pressed && styles.pressed,
               ]}
-            >
-              <Text
+              accessibilityLabel="Open user profile"
+              accessibilityRole="button">
+              <View
                 style={[
-                  styles.avatarInitial,
-                  { color: user ? '#FFFFFF' : colors.textSecondary },
+                  styles.avatarRing,
+                  {
+                    backgroundColor: '#047857',
+                    borderColor: isDark ? '#05966980' : '#A7F3D0',
+                  },
                 ]}
               >
-                {firstChar}
-              </Text>
-            </View>
-          </Pressable>
+                <Text
+                  style={[
+                    styles.avatarInitial,
+                    { color: '#FFFFFF' },
+                  ]}
+                >
+                  {firstChar}
+                </Text>
+              </View>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={handleAvatarPress}
+              style={({ pressed }) => [
+                styles.loginBtnNav,
+                { backgroundColor: colors.primary },
+                pressed && styles.pressed,
+              ]}
+              accessibilityLabel="Login or Sign up"
+              accessibilityRole="button">
+              <Text style={styles.loginBtnNavText}>Login</Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </View>
@@ -210,5 +219,19 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.75,
     transform: [{ scale: 0.97 }],
+  },
+  loginBtnNav: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  loginBtnNavText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });

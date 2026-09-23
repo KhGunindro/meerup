@@ -20,6 +20,10 @@ import { openTurnByTurnNavigation, openLocationPin } from '@/utils/navigation';
 import { useLocation } from '@/hooks/use-location';
 import { AudioGuidePlayer } from '@/components/destination/AudioGuidePlayer';
 
+import { useAuth } from '@/context/AuthContext';
+import { toggleSavePlace, isPlaceSaved } from '@/utils/savePlace';
+import { useFocusEffect } from 'expo-router';
+
 const { width: SCREEN_W } = Dimensions.get('window');
 const HERO_H = 260;
 
@@ -33,11 +37,26 @@ export default function DestinationDetail() {
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const isDark = scheme === 'dark';
   const { location, getFormattedDistance } = useLocation();
+  const { user } = useAuth();
 
   const [tab, setTab] = useState<Tab>('why');
   const [bookmarked, setBookmarked] = useState(false);
 
   const dest = findDestination(id ?? '');
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (dest) {
+        isPlaceSaved(user?.id || null, dest.name).then(setBookmarked);
+      }
+    }, [dest, user])
+  );
+
+  const handleToggleBookmark = async () => {
+    if (!dest) return;
+    const isNowSaved = await toggleSavePlace(user?.id || null, dest);
+    setBookmarked(isNowSaved);
+  };
 
   if (!dest) {
     return (
@@ -81,7 +100,7 @@ export default function DestinationDetail() {
         </TouchableOpacity>
         <View style={styles.topRight}>
           <TouchableOpacity
-            onPress={() => setBookmarked((b) => !b)}
+            onPress={handleToggleBookmark}
             style={[styles.topBtn, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.92)' }]}>
             <Ionicons
               name={bookmarked ? 'bookmark' : 'bookmark-outline'}

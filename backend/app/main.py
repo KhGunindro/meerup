@@ -1,4 +1,4 @@
-"""Main FastAPI application for Meerup AI & Vision services."""
+"""Main FastAPI application for Meerup AI, Vision, and Tourism Recommendations."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.tourism.router import router as recommendations_router
 from app.vision.router import get_landmark_service, router as vision_router
 
 logging.basicConfig(level=logging.INFO)
@@ -33,9 +34,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Meerup AI & Vision API",
-    description="Lightweight CPU-optimized Computer Vision & Cultural AI Storytelling for Manipur Tourism.",
-    version="1.0.0",
+    title="Meerup AI, Vision & Tourism API",
+    description="Lightweight Computer Vision, Cultural AI Storytelling, and Web-Scraped Destination Recommendation Cards for Manipur Tourism.",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -48,14 +49,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include vision and cultural AI routes
+# Include routes
 app.include_router(vision_router)
+app.include_router(recommendations_router)
 
 
 @app.get("/", tags=["Health"])
 async def root():
     return {
-        "app": "Meerup AI & Vision Backend",
+        "app": "Meerup AI & Tourism Backend",
         "status": "online",
         "docs": "/docs",
         "vision_endpoints": {
@@ -63,6 +65,11 @@ async def root():
             "recognize_base64": "POST /api/vision/recognize-base64",
             "supported_places": "GET /api/vision/places",
             "status": "GET /api/vision/status",
+        },
+        "recommendation_endpoints": {
+            "nearby_cards": "GET /api/recommendations/nearby?latitude=24.8170&longitude=93.9368&radius_km=20",
+            "search_cards": "GET /api/recommendations/search?q=Andro",
+            "single_card": "GET /api/recommendations/{place_id}/card",
         },
     }
 

@@ -11,3 +11,4 @@ numpy
 httpx
 opencv-python-headless
 python-multipart
+beautifulsoup4

@@ -51,7 +51,15 @@ export default function DestinationDetail() {
   }
 
   const openNavigation = () => {
-    openTurnByTurnNavigation(dest.lat, dest.lng, dest.name);
+    router.push({
+      pathname: '/map',
+      params: {
+        destLat: dest.lat.toString(),
+        destLng: dest.lng.toString(),
+        destName: dest.name,
+        destCategory: dest.category,
+      },
+    });
   };
 
   const openMaps = () => {

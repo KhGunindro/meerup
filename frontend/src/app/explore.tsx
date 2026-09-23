@@ -151,7 +151,17 @@ export default function ExploreScreen() {
                   <TouchableOpacity
                     style={[styles.goBtn, { backgroundColor: colors.primary }]}
                     accessibilityLabel={`Navigate to ${dest.name}`}
-                    onPress={() => openTurnByTurnNavigation(dest.lat, dest.lng, dest.name)}>
+                    onPress={() =>
+                      router.push({
+                        pathname: '/map',
+                        params: {
+                          destLat: dest.lat.toString(),
+                          destLng: dest.lng.toString(),
+                          destName: dest.name,
+                          destCategory: dest.category,
+                        },
+                      })
+                    }>
                     <Ionicons name="navigate" size={13} color="#FFF" />
                   </TouchableOpacity>
                 </View>

@@ -23,18 +23,37 @@ export function getDistanceKm(lat1: number, lon1: number, lat2: number, lon2: nu
 }
 
 /**
- * Launches live turn-by-turn GPS route navigation to target coordinates.
- * - Android: Uses 'google.navigation:q=lat,lng&mode=d' which launches Google Maps in active
- *   voice-guided turn-by-turn driving navigation with live GPS car icon ("Finding best route...").
- * - iOS: Uses 'maps://?daddr=lat,lng&dirflg=d' which starts turn-by-turn navigation in Apple Maps.
- * - Web/Fallback: Opens Google Maps Directions in a new tab.
+ * Calculates realistic estimated travel time (in minutes) based on Manipur terrain/city driving speeds.
  */
-export function openTurnByTurnNavigation(
+export function calculateEtaMinutes(distanceKm: number): number {
+  if (distanceKm <= 0.1) return 1;
+  // Realistic average speed in Imphal & Manipur valley: ~28 km/h + 3 mins start/turn buffer
+  const avgSpeedKmh = distanceKm > 15 ? 35 : 25;
+  const driveMinutes = Math.round((distanceKm / avgSpeedKmh) * 60) + 3;
+  return Math.max(3, driveMinutes);
+}
+
+/**
+ * Formats ETA and distance nicely for Swiggy-style status badge.
+ */
+export function formatEtaString(minutes: number, distanceKm: number): string {
+  const distStr = distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`;
+  if (minutes < 60) {
+    return `${minutes} mins • ${distStr}`;
+  }
+  const hrs = Math.floor(minutes / 60);
+  const remMins = minutes % 60;
+  return `${hrs} hr ${remMins > 0 ? `${remMins} min` : ''} • ${distStr}`;
+}
+
+/**
+ * Launches external live turn-by-turn GPS route navigation (Google Maps / Apple Maps).
+ */
+export function launchExternalNavigationApp(
   lat: number,
   lng: number,
   label?: string
 ) {
-  // Use explicit destination landmark query so Google Maps/Apple Maps locks onto the exact place (e.g. Ima Keithel vs Kangla Fort)
   const destQuery = label ? encodeURIComponent(`${label}, Manipur`) : `${lat},${lng}`;
   const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${destQuery}`;
 
@@ -62,6 +81,9 @@ export function openTurnByTurnNavigation(
     });
 }
 
+// Backwards-compatible alias for existing callers
+export const openTurnByTurnNavigation = launchExternalNavigationApp;
+
 /**
  * Opens a location pin overview / search on Google Maps.
  */
@@ -69,4 +91,3 @@ export function openLocationPin(lat: number, lng: number) {
   const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
   Linking.openURL(url);
 }
-

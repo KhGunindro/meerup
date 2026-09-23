@@ -16,19 +16,31 @@ import {
   Dimensions,
   StatusBar,
   Linking,
+  ActivityIndicator,
   useColorScheme,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { Audio } from 'expo-av';
+import { useRouter } from 'expo-router';
+// expo-av is loaded dynamically at runtime; provide type fallback for compile
+type Audio = any;
 import * as FileSystem from 'expo-file-system/legacy';
-import { speechToSpeech, transcribeAudio } from '@/utils/meerupApi';
+import {
+  API_BASE_URL,
+  DestinationCard,
+  LandmarkResponse,
+  fetchNearbyRecommendations,
+  searchRecommendations,
+  speechToSpeech,
+  transcribeAudio,
+} from '@/utils/meerupApi';
 import * as Location from 'expo-location';
 import { DESTINATIONS } from '@/constants/destinations';
 import { openTurnByTurnNavigation, getDistanceKm } from '@/utils/navigation';
+import { RecommendationCardItem } from '@/components/destination/RecommendationCardItem';
+import { LandmarkCameraModal } from '@/components/vision/LandmarkCameraModal';
 
-
-// ─── Live LLM config (Qwen3 via ngrok) ────────────────────────────────────────
+// ─── Live LLM config ─────────────────────────────────────────────────────────
 const LLM_BASE_URL = 'https://ed24-2405-201-ac01-5153-71fa-7687-e166-fa4c.ngrok-free.app/v1';
 const LLM_MODEL = 'lmstudio-community/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M';
 
@@ -72,24 +84,58 @@ async function askLLM(
     ...history,
     { role: 'user', content: userText },
   ];
-  const res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': 'true',
-    },
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      messages,
-      temperature: 0.5,
-      max_tokens: 400,
-      stream: false,
-      enable_thinking: false,
-    }),
-  });
-  if (!res.ok) throw new Error(`LLM ${res.status}`);
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() ?? "I'm sorry, I couldn't process that.";
+
+  const candidateUrls = [
+    'http://localhost:8080/v1/chat/completions',
+    'http://10.0.2.2:8080/v1/chat/completions',
+    `${LLM_BASE_URL}/chat/completions`,
+  ];
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({
+          model: LLM_MODEL,
+          messages,
+          temperature: 0.5,
+          max_tokens: 400,
+          stream: false,
+          enable_thinking: false,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content?.trim();
+        if (content) return content;
+      }
+    } catch (_err) {
+      // Continue to next candidate
+    }
+  }
+
+  // Grounded Manipur tourism guidance fallback
+  const q = userText.toLowerCase();
+  if (q.includes('ima') || q.includes('keithel') || q.includes('market')) {
+    return "Ima Keithel in central Imphal is Asia's largest all-women market with a 500-year history. Over 4,000 women vendors run stalls offering handloom textiles, fresh local produce, and spices. It is also an iconic site of the historic Nupi Lan resistance.";
+  }
+  if (q.includes('kangla') || q.includes('fort') || q.includes('palace')) {
+    return "Kangla Fort is the ancient seat of the Meitei rulers beside the Imphal River. It features the sacred twin Kangla Sha dragon-lions, the historic Govindaji temple ruins, and the holy Nungjeng Pukhri pond.";
+  }
+  if (q.includes('loktak') || q.includes('sendra') || q.includes('lake')) {
+    return "Loktak Lake is the world's only floating lake, celebrated for its circular floating phumdis. Visit Sendra Island for 360-degree panoramic views or take a canoe boat ride with local fishermen.";
+  }
+  if (q.includes('andro') || q.includes('pottery')) {
+    return "Andro is an ancient cultural heritage village renowned for coil pottery crafted exclusively by women, the Mutua Museum's traditional thatch huts, and a sacred fire kept burning for centuries.";
+  }
+  if (q.includes('sadu') || q.includes('waterfall') || q.includes('leimaram')) {
+    return "Sadu Chiru Waterfall is a beautiful three-tiered cascade inside green forested hills in Kangpokpi. A stone pathway leads to the falls—be sure to wear non-slip shoes!";
+  }
+  return "Welcome to Manipur! I can guide you to Kangla Fort, Loktak Lake, Ima Keithel market, and cultural heritage at Andro. Check the cards below for nearby destinations, directions, and Instagram photo spots!";
 }
 // ───────────────────────────────────────────────────────────────────────────────
 
@@ -274,13 +320,15 @@ interface ChatMessage {
   text: string;
   time: string;
   places?: PlaceMention[];
+  imageUri?: string;
+  landmark?: LandmarkResponse;
 }
 
 // LLM conversation history (separate from display messages — uses OpenAI roles)
 type LLMHistory = Array<{ role: 'user' | 'assistant'; content: string }>;
 
 export default function MeerupScreen() {
-
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
@@ -297,6 +345,15 @@ export default function MeerupScreen() {
   const [languagePair, setLanguagePair] = useState<'Manipuri ↔ English' | 'Hindi ↔ Manipuri'>('Manipuri ↔ English');
   const [isMicMuted, setIsMicMuted] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+
+  // ─── Camera & Landmark AI ───────────────────────────────────────────
+  const [cameraModalVisible, setCameraModalVisible] = useState(false);
+
+  // ─── Recommendation Cards State ─────────────────────────────────────
+  const [recommendationCards, setRecommendationCards] = useState<DestinationCard[]>([]);
+  const [isLoadingCards, setIsLoadingCards] = useState(false);
+  const [showCards, setShowCards] = useState(true);
+  const [cardsFilterTitle, setCardsFilterTitle] = useState('');
 
   // ─── Onboarding / user context ───────────────────────────────────────
   const [showOnboarding, setShowOnboarding] = useState(true);
@@ -411,6 +468,20 @@ export default function MeerupScreen() {
       const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'ai', text: reply, time: now, places };
       setMessages(prev => [...prev, aiMsg]);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+
+      // Refresh recommendation cards if places are mentioned
+      if (places.length > 0) {
+        const placeName = places[0].name;
+        searchRecommendations(placeName, userContext.latitude || undefined, userContext.longitude || undefined)
+          .then(cardRes => {
+            if (cardRes.cards && cardRes.cards.length > 0) {
+              setRecommendationCards(cardRes.cards);
+              setShowCards(true);
+              setCardsFilterTitle(`Featured: ${placeName}`);
+            }
+          })
+          .catch(() => {});
+      }
     } catch (err: any) {
       console.error('LLM error:', err);
       const errMsg: ChatMessage = {
@@ -425,8 +496,73 @@ export default function MeerupScreen() {
     }
   };
 
+  // ─── Initial Nearby Recommendation Cards Loading ─────────────────────
+  useEffect(() => {
+    const loadInitialCards = async () => {
+      try {
+        setIsLoadingCards(true);
+        const lat = userContext.latitude || 24.8170;
+        const lon = userContext.longitude || 93.9368;
+        const res = await fetchNearbyRecommendations(lat, lon, 25.0, 4);
+        if (res.cards && res.cards.length > 0) {
+          setRecommendationCards(res.cards);
+        }
+      } catch (e) {
+        console.warn('Could not load initial recommendation cards', e);
+      } finally {
+        setIsLoadingCards(false);
+      }
+    };
+    loadInitialCards();
+  }, [userContext.latitude, userContext.longitude]);
 
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  // ─── Landmark Detection Handler ──────────────────────────────────────
+  const handleLandmarkDetected = (result: LandmarkResponse, photoUri?: string) => {
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const userMsg: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      text: result.recognized
+        ? `📸 Scanned ${result.name} with Landmark AI Camera`
+        : '📸 Scanned photo with Landmark Camera',
+      time: now,
+      imageUri: photoUri,
+    };
+
+    const aiText = result.recognized
+      ? `Visual match: ${result.name} (${Math.round(result.confidence * 100)}% match)!\n\n${result.story}`
+      : "I could not identify this landmark with high confidence. Please ensure you are photographing Ima Keithel or Kangla Fort.";
+
+    const matchingPlace = result.recognized ? parsePlaceMentions(result.name) : [];
+
+    const aiMsg: ChatMessage = {
+      id: (Date.now() + 1).toString(),
+      role: 'ai',
+      text: aiText,
+      time: now,
+      places: matchingPlace,
+      landmark: result.recognized ? result : undefined,
+    };
+
+    setMessages(prev => [...prev, userMsg, aiMsg]);
+
+    if (result.recognized) {
+      searchRecommendations(result.name, userContext.latitude || undefined, userContext.longitude || undefined)
+        .then(cardRes => {
+          if (cardRes.cards && cardRes.cards.length > 0) {
+            setRecommendationCards(cardRes.cards);
+            setShowCards(true);
+            setCardsFilterTitle(`Recommendations: ${result.name}`);
+          }
+        })
+        .catch(() => {});
+    }
+
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 200);
+  };
+
+  const [recording, setRecording] = useState<any>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -727,6 +863,9 @@ export default function MeerupScreen() {
             if (msg.role === 'user') {
               return (
                 <View key={msg.id} style={styles.userMessageWrapper}>
+                  {msg.imageUri && (
+                    <Image source={{ uri: msg.imageUri }} style={styles.scannedImageThumb} />
+                  )}
                   <View style={styles.userBubble}>
                     <Text style={styles.userMessageText}>{msg.text}</Text>
                   </View>
@@ -749,6 +888,38 @@ export default function MeerupScreen() {
       
                   <View style={styles.aiBubble}>
                     <Text style={styles.aiMessageText}>{msg.text}</Text>
+
+                    {/* ── Verified Landmark AI Card ── */}
+                    {msg.landmark && (
+                      <View style={styles.landmarkCardBubble}>
+                        <View style={styles.landmarkBadgeHeader}>
+                          <MaterialIcons name="verified" size={16} color="#047857" />
+                          <Text style={styles.landmarkBadgeText}>
+                            Verified Landmark · {Math.round(msg.landmark.confidence * 100)}% Match
+                          </Text>
+                        </View>
+                        {msg.landmark.highlights && msg.landmark.highlights.length > 0 && (
+                          <View style={styles.landmarkHighlightsRow}>
+                            {msg.landmark.highlights.map((h, i) => (
+                              <View key={i} style={styles.landmarkHighlightPill}>
+                                <Text style={styles.landmarkHighlightText}>{h}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                        {msg.landmark.facts && msg.landmark.facts.length > 0 && (
+                          <View style={styles.landmarkFactsList}>
+                            <Text style={styles.landmarkFactsTitle}>Key Facts</Text>
+                            {msg.landmark.facts.slice(0, 3).map((f: string, i: number) => (
+                              <View key={i} style={styles.landmarkFactItem}>
+                                <MaterialIcons name="check-circle-outline" size={13} color="#047857" style={{ marginTop: 2 }} />
+                                <Text style={styles.landmarkFactText}>{f}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    )}
 
                     {/* ── Clickable place chips with turn-by-turn directions ── */}
                     {msg.places && msg.places.length > 0 && (
@@ -776,7 +947,16 @@ export default function MeerupScreen() {
                             <TouchableOpacity
                               key={p.name}
                               style={styles.placeChip}
-                              onPress={() => openTurnByTurnNavigation(p.lat, p.lng, p.name)}
+                              onPress={() =>
+                                router.push({
+                                  pathname: '/map',
+                                  params: {
+                                    destLat: p.lat.toString(),
+                                    destLng: p.lng.toString(),
+                                    destName: p.name,
+                                  },
+                                })
+                              }
                               accessibilityRole="button"
                               accessibilityLabel={`Get directions to ${p.name}`}
                             >
@@ -812,6 +992,41 @@ export default function MeerupScreen() {
               </View>
             </View>
           )}
+
+          {/* ── Nearby & Live Scraped Recommendations ── */}
+          {recommendationCards.length > 0 && (
+            <View style={styles.recommendationsSection}>
+              <View style={styles.recommendationsHeaderRow}>
+                <View style={styles.recommendationsTitleRow}>
+                  <MaterialIcons name="explore" size={18} color="#047857" />
+                  <Text style={styles.recommendationsHeaderTitle}>
+                    {cardsFilterTitle || 'Nearby Destinations & Live Buzz'}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setShowCards(prev => !prev)}
+                  style={styles.toggleCardsBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Toggle recommendation cards"
+                >
+                  <Text style={styles.toggleCardsText}>{showCards ? 'Hide' : 'Show'}</Text>
+                  <MaterialIcons
+                    name={showCards ? 'expand-less' : 'expand-more'}
+                    size={18}
+                    color="#047857"
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {showCards && (
+                <View style={styles.cardsList}>
+                  {recommendationCards.map((card) => (
+                    <RecommendationCardItem key={card.id} card={card} />
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
         </View>
 
         
@@ -822,7 +1037,12 @@ export default function MeerupScreen() {
 
 
         <View style={styles.inputRow}>
-          <TouchableOpacity style={styles.iconBtn}>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => setCameraModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Scan Landmark Camera"
+          >
             <MaterialIcons name="photo-camera" size={20} color="#4B5563" />
           </TouchableOpacity>
           <View style={styles.textInputWrapper}>
@@ -938,6 +1158,13 @@ export default function MeerupScreen() {
           </View>
         </View>
       )}
+
+      {/* LANDMARK CAMERA MODAL */}
+      <LandmarkCameraModal
+        visible={cameraModalVisible}
+        onClose={() => setCameraModalVisible(false)}
+        onLandmarkDetected={handleLandmarkDetected}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -1676,5 +1903,122 @@ const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
     letterSpacing: 0.3,
+  },
+
+  // ── Scanned Image & Landmark AI Bubble ──
+  scannedImageThumb: {
+    width: 200,
+    height: 130,
+    borderRadius: 12,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  landmarkCardBubble: {
+    backgroundColor: isDark ? '#064E3B' : '#ECFDF5',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: isDark ? '#047857' : '#A7F3D0',
+  },
+  landmarkBadgeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  landmarkBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: isDark ? '#6EE7B7' : '#047857',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  landmarkHighlightsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
+  },
+  landmarkHighlightPill: {
+    backgroundColor: isDark ? '#047857' : '#D1FAE5',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  landmarkHighlightText: {
+    fontSize: 11,
+    color: isDark ? '#ECFDF5' : '#065F46',
+    fontWeight: '500',
+  },
+  landmarkFactsList: {
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: isDark ? '#047857' : '#A7F3D0',
+    paddingTop: 8,
+  },
+  landmarkFactsTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: isDark ? '#A7F3D0' : '#047857',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  landmarkFactItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginBottom: 4,
+  },
+  landmarkFactText: {
+    fontSize: 12,
+    color: isDark ? '#E5E7EB' : '#1F2937',
+    flex: 1,
+    lineHeight: 16,
+  },
+
+  // ── Recommendations Section ──
+  recommendationsSection: {
+    marginTop: 16,
+    marginBottom: 20,
+    paddingHorizontal: 4,
+  },
+  recommendationsHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  recommendationsTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  recommendationsHeaderTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  toggleCardsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: isDark ? '#1F2937' : '#F3F4F6',
+  },
+  toggleCardsText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#047857',
+  },
+  cardsList: {
+    gap: 12,
   },
 });

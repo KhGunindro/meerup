@@ -5,5 +5,6 @@ description = "Backend for meerup project"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "beautifulsoup4>=4.15.0",
     "python-multipart>=0.0.32",
 ]

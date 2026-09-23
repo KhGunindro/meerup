@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.ai.router import openai_compat_router, router as ai_router
 from app.tourism.router import router as recommendations_router
 from app.vision.router import get_landmark_service, router as vision_router
+from app.translation_proxy import router as translation_proxy_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("meerup.backend")
@@ -55,6 +56,7 @@ app.include_router(vision_router)
 app.include_router(recommendations_router)
 app.include_router(ai_router)
 app.include_router(openai_compat_router)
+app.include_router(translation_proxy_router)
 
 
 @app.get("/", tags=["Health"])

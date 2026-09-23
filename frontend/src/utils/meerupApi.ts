@@ -26,19 +26,24 @@ const getHost = (): string => {
 
 const HOST = getHost();
 
-export const NGROK_TRANSLATION_URL = 'https://nonexterminative-lucinda-gentlemanlike.ngrok-free.dev';
+// Public live ngrok URL for both Backend and Translation services
+export const NGROK_PUBLIC_URL = 'https://nonexterminative-lucinda-gentlemanlike.ngrok-free.dev';
+export const NGROK_TRANSLATION_URL = NGROK_PUBLIC_URL;
 
-// Live ngrok tunnel for Translation & Speech-to-Speech
+// Ngrok request headers to bypass interstitial splash screen
+export const NGROK_HEADERS: Record<string, string> = {
+  'ngrok-skip-browser-warning': 'true',
+};
+
+// Unified Backend (FastAPI on Port 8001 + Proxied Translation on Port 8000)
+export const BACKEND_API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL || NGROK_PUBLIC_URL;
+
+export const API_BASE_URL = BACKEND_API_BASE_URL;
+
+// Translation & Speech-to-Speech API
 export const TRANSLATION_API_BASE_URL =
-  process.env.EXPO_PUBLIC_TRANSLATION_URL || NGROK_TRANSLATION_URL;
-
-export const BACKEND_API_BASE_URL = `http://${HOST}:8001`;
-
-export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ||
-  (typeof window !== 'undefined' && window.location?.hostname
-    ? `http://${window.location.hostname}:8001`
-    : BACKEND_API_BASE_URL);
+  process.env.EXPO_PUBLIC_TRANSLATION_URL || NGROK_PUBLIC_URL;
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 export interface ApiResponse {
@@ -208,6 +213,7 @@ export const synthesizeVoice = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...NGROK_HEADERS,
       },
       body: JSON.stringify({
         text,
@@ -468,6 +474,9 @@ export const recognizeLandmarkFile = async (
 
   const response = await fetch(`${API_BASE_URL}/api/vision/recognize`, {
     method: 'POST',
+    headers: {
+      ...NGROK_HEADERS,
+    },
     body: formData,
   });
 
@@ -484,7 +493,10 @@ export const recognizeLandmarkBase64 = async (
 ): Promise<LandmarkResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/vision/recognize-base64`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...NGROK_HEADERS,
+    },
     body: JSON.stringify({ image_base64: imageBase64 }),
   });
 
@@ -504,7 +516,11 @@ export const fetchNearbyRecommendations = async (
   limit = 5
 ): Promise<NearbyCardsResponse> => {
   const url = `${API_BASE_URL}/api/recommendations/nearby?latitude=${latitude}&longitude=${longitude}&radius_km=${radiusKm}&limit=${limit}`;
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: {
+      ...NGROK_HEADERS,
+    },
+  });
   if (!response.ok) {
     throw new Error(`Recommendations API error (${response.status})`);
   }
@@ -521,7 +537,11 @@ export const searchRecommendations = async (
   if (latitude !== undefined && longitude !== undefined) {
     url += `&latitude=${latitude}&longitude=${longitude}`;
   }
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: {
+      ...NGROK_HEADERS,
+    },
+  });
   if (!response.ok) {
     throw new Error(`Search recommendations error (${response.status})`);
   }
@@ -537,7 +557,11 @@ export const fetchDestinationCard = async (
   if (latitude !== undefined && longitude !== undefined) {
     url += `?latitude=${latitude}&longitude=${longitude}`;
   }
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: {
+      ...NGROK_HEADERS,
+    },
+  });
   if (!response.ok) {
     throw new Error(`Destination card error (${response.status})`);
   }
@@ -552,7 +576,7 @@ export const checkTranslationEngineHealth = async (): Promise<boolean> => {
     const response = await fetch(`${TRANSLATION_API_BASE_URL}/api/health`, {
       method: 'GET',
       headers: {
-        'ngrok-skip-browser-warning': 'true',
+        ...NGROK_HEADERS,
       },
     });
     return response.ok;
@@ -578,6 +602,7 @@ export const askGroundedChat = async (
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...NGROK_HEADERS,
     },
     body: JSON.stringify({
       message,

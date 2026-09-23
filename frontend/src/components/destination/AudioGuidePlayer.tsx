@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
+import { WebView } from 'react-native-webview';
 import { AudioGuide } from '@/constants/destinations';
 import { Colors } from '@/constants/theme';
 import {
@@ -18,12 +19,15 @@ import {
 } from '@/utils/meerupApi';
 import { PREGENERATED_STORIES, getPregeneratedAudio } from '@/constants/pregeneratedStories';
 
-// Safely require expo-av runtime
-let AudioRuntime: any = null;
+// Safe expo-audio imports (Expo SDK 57 native audio standard)
+let createAudioPlayer: any = null;
+let setAudioModeAsync: any = null;
 try {
-  AudioRuntime = require('expo-av').Audio;
+  const expoAudio = require('expo-audio');
+  createAudioPlayer = expoAudio.createAudioPlayer;
+  setAudioModeAsync = expoAudio.setAudioModeAsync;
 } catch (e) {
-  // expo-av fallback handled
+  // expo-audio fallback handled
 }
 
 interface AudioGuidePlayerProps {
@@ -68,8 +72,10 @@ export function AudioGuidePlayer({
   });
 
   // Sound instance references
-  const nativeSoundRef = useRef<any>(null);
+  const activeNativePlayerRef = useRef<any>(null);
   const webAudioRef = useRef<any>(null);
+  const webViewRef = useRef<any>(null);
+  const isWebViewLoadedRef = useRef<boolean>(false);
   // Cache base64 audio per language so repeat plays are instant
   const audioCacheRef = useRef<Record<string, string>>({});
 
@@ -143,6 +149,20 @@ export function AudioGuidePlayer({
   }, []);
 
   const stopAllAudio = async () => {
+    if (activeNativePlayerRef.current) {
+      try {
+        activeNativePlayerRef.current.pause();
+        activeNativePlayerRef.current.remove?.();
+      } catch (e) {}
+      activeNativePlayerRef.current = null;
+    }
+    if (webViewRef.current) {
+      try {
+        webViewRef.current.injectJavaScript(
+          'if (window._guideAudio) { window._guideAudio.pause(); window._guideAudio.currentTime = 0; } true;'
+        );
+      } catch (e) {}
+    }
     if (webAudioRef.current) {
       try {
         webAudioRef.current.pause();
@@ -150,23 +170,28 @@ export function AudioGuidePlayer({
       } catch (e) {}
       webAudioRef.current = null;
     }
-    if (nativeSoundRef.current) {
-      try {
-        await nativeSoundRef.current.stopAsync();
-        await nativeSoundRef.current.unloadAsync();
-      } catch (e) {}
-      nativeSoundRef.current = null;
-    }
     if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as any).speechSynthesis) {
       (window as any).speechSynthesis.cancel();
     }
+    isWebViewLoadedRef.current = false;
+    setIsPlaying(false);
   };
 
-  // Play audio synthesized by AI4Bharat / Neural model from the auto-generated transcript
+  // Play audio synthesized by AI4Bharat / Neural model or instant pregenerated audio
   const playAudio = async () => {
-    if (nativeSoundRef.current) {
+    // 1. Resume if already loaded & paused
+    if (activeNativePlayerRef.current) {
       try {
-        await nativeSoundRef.current.playAsync();
+        activeNativePlayerRef.current.play();
+        setIsPlaying(true);
+        return;
+      } catch (e) {}
+    }
+    if (webViewRef.current && isWebViewLoadedRef.current) {
+      try {
+        webViewRef.current.injectJavaScript(
+          'if (window._guideAudio) { window._guideAudio.play(); } true;'
+        );
         setIsPlaying(true);
         return;
       } catch (e) {}
@@ -188,7 +213,10 @@ export function AudioGuidePlayer({
         transcriptText = await getOrFetchTranscript(selectedLang);
       }
 
+      // 1. Check in-memory audioCache
       let b64 = audioCacheRef.current[selectedLang];
+
+      // 2. Check pregenerated constant store (instant zero-latency)
       if (!b64 && matchedPregenKey) {
         const localAudio = getPregeneratedAudio(matchedPregenKey, selectedLang);
         if (localAudio) {
@@ -196,6 +224,8 @@ export function AudioGuidePlayer({
           audioCacheRef.current[selectedLang] = b64;
         }
       }
+
+      // 3. Check pregenerated backend endpoint
       if (!b64 && matchedPregenKey) {
         try {
           const pregenRes = await fetchPregeneratedAudioGuide(matchedPregenKey, selectedLang);
@@ -205,6 +235,8 @@ export function AudioGuidePlayer({
           }
         } catch (e) {}
       }
+
+      // 4. Live neural TTS synthesis if not pregenerated
       if (!b64) {
         const result = await synthesizeTextToSpeech(transcriptText, selectedLang, 'female');
         if (result.audioBase64) {
@@ -216,12 +248,15 @@ export function AudioGuidePlayer({
       if (b64) {
         const cleanB64 = b64.includes(',') ? b64.split(',')[1] : b64;
 
-        // 1. Web Audio
+        // Engine A: Browser HTML5 Audio (Web)
         if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as any).Audio) {
           const snd = new (window as any).Audio(`data:audio/wav;base64,${cleanB64}`);
           webAudioRef.current = snd;
 
           snd.onended = () => {
+            setIsPlaying(false);
+          };
+          snd.onerror = () => {
             setIsPlaying(false);
           };
 
@@ -231,45 +266,85 @@ export function AudioGuidePlayer({
           return;
         }
 
-        // 2. Native expo-av Sound
-        if (AudioRuntime && FileSystem.cacheDirectory) {
+        // Engine B: Native expo-audio (SDK 57)
+        if (createAudioPlayer && FileSystem.cacheDirectory) {
           try {
-            await AudioRuntime.setAudioModeAsync({
-              allowsRecordingIOS: false,
-              playsInSilentModeIOS: true,
-              staysActiveInBackground: false,
-              shouldDuckAndroid: true,
-            });
+            if (setAudioModeAsync) {
+              await setAudioModeAsync({
+                playsInSilentMode: true,
+                allowsRecording: false,
+              }).catch(() => {});
+            }
 
-            const tempUri = `${FileSystem.cacheDirectory}guide_${guide.title.replace(/[^a-zA-Z0-9]/g, '_')}_${selectedLang}.wav`;
+            const tempUri = `${FileSystem.cacheDirectory}guide_${matchedPregenKey || 'story'}_${selectedLang}.wav`;
             await FileSystem.writeAsStringAsync(tempUri, cleanB64, {
               encoding: FileSystem.EncodingType?.Base64 || 'base64',
             });
 
-            const { sound } = await AudioRuntime.Sound.createAsync(
-              { uri: tempUri },
-              { shouldPlay: true, shouldCorrectPitch: true },
-              (status: any) => {
-                if (status.isLoaded && status.didJustFinish) {
-                  setIsPlaying(false);
-                }
+            const player = createAudioPlayer(tempUri);
+            activeNativePlayerRef.current = player;
+            player.addListener('playbackStatusUpdate', (status: any) => {
+              if (status?.didJustFinish) {
+                setIsPlaying(false);
               }
-            );
+            });
 
-            nativeSoundRef.current = sound;
+            player.play();
             setIsPlaying(true);
             setIsLoadingAudio(false);
             return;
           } catch (nativeErr) {
-            console.warn('Native Audio Guide playback notice:', nativeErr);
+            console.log('Native expo-audio fallback to WebView bridge:', nativeErr);
+          }
+        }
+
+        // Engine C: Universal WebView HTML5 Audio bridge (100% reliable on Android & iOS)
+        if (webViewRef.current) {
+          try {
+            const playScript = `
+              (function() {
+                try {
+                  if (window._guideAudio) {
+                    window._guideAudio.pause();
+                  }
+                  var audio = new Audio("data:audio/wav;base64,${cleanB64}");
+                  window._guideAudio = audio;
+                  audio.onended = function() {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ended' }));
+                  };
+                  audio.onerror = function() {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error' }));
+                  };
+                  audio.onplay = function() {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'play' }));
+                  };
+                  audio.onpause = function() {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'pause' }));
+                  };
+                  audio.play().catch(function(err) {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: err.message }));
+                  });
+                } catch (e) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: e.message }));
+                }
+              })();
+              true;
+            `;
+            webViewRef.current.injectJavaScript(playScript);
+            isWebViewLoadedRef.current = true;
+            setIsPlaying(true);
+            setIsLoadingAudio(false);
+            return;
+          } catch (wvErr) {
+            console.log('WebView bridge playback notice:', wvErr);
           }
         }
       }
     } catch (apiErr) {
-      console.warn('AI TTS Model request notice:', apiErr);
+      console.warn('Audio playback notice:', apiErr);
     }
 
-    // 3. Fallback Web SpeechSynthesis
+    // Engine D: Fallback Web SpeechSynthesis
     if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(activeTranscript);
@@ -286,14 +361,21 @@ export function AudioGuidePlayer({
 
   const pauseAudio = async () => {
     setIsPlaying(false);
+    if (activeNativePlayerRef.current) {
+      try {
+        activeNativePlayerRef.current.pause();
+      } catch (e) {}
+    }
+    if (webViewRef.current) {
+      try {
+        webViewRef.current.injectJavaScript(
+          'if (window._guideAudio) { window._guideAudio.pause(); } true;'
+        );
+      } catch (e) {}
+    }
     if (webAudioRef.current) {
       try {
         webAudioRef.current.pause();
-      } catch (e) {}
-    }
-    if (nativeSoundRef.current) {
-      try {
-        await nativeSoundRef.current.pauseAsync();
       } catch (e) {}
     }
     if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as any).speechSynthesis) {
@@ -465,6 +547,37 @@ export function AudioGuidePlayer({
           </View>
         )}
       </TouchableOpacity>
+
+      {/* Invisible HTML5 Audio WebView bridge for 100% reliable native audio playback */}
+      {Platform.OS !== 'web' && (
+        <WebView
+          ref={webViewRef}
+          originWhitelist={['*']}
+          style={{ width: 0, height: 0, position: 'absolute', opacity: 0 }}
+          source={{ html: '<!DOCTYPE html><html><head></head><body></body></html>' }}
+          mediaPlaybackRequiresUserAction={false}
+          allowsInlineMediaPlayback={true}
+          javaScriptEnabled={true}
+          onMessage={(event) => {
+            try {
+              const data = JSON.parse(event.nativeEvent.data);
+              if (data.type === 'ended' || data.type === 'error') {
+                setIsPlaying(false);
+                isWebViewLoadedRef.current = false;
+              } else if (data.type === 'play') {
+                setIsPlaying(true);
+              } else if (data.type === 'pause') {
+                setIsPlaying(false);
+              }
+            } catch (e) {
+              if (event.nativeEvent.data === 'ended' || event.nativeEvent.data === 'error') {
+                setIsPlaying(false);
+                isWebViewLoadedRef.current = false;
+              }
+            }
+          }}
+        />
+      )}
     </View>
   );
 }

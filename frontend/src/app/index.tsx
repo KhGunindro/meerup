@@ -137,8 +137,12 @@ export default function HomeScreen() {
       <View style={[styles.askCard, { backgroundColor: cardBg, borderColor: colors.border }]}>
         <View style={styles.askCardHeader}>
           <Text style={[styles.askCardTitle, { color: colors.text }]}>Ask MEERUP</Text>
-          <View style={[styles.sparkleChip, { backgroundColor: isDark ? '#2D2000' : '#FEF3C7' }]}>
-            <Ionicons name="sparkles" size={13} color={colors.accent} />
+          <View style={styles.sparkleChip}>
+            <Image 
+              source={require('@/assets/images/ai.png')} 
+              style={{ width: 28, height: 28, borderRadius: 14 }} 
+              resizeMode="cover" 
+            />
           </View>
         </View>
         <View style={[styles.inputRow, { backgroundColor: sectionBg, borderColor: colors.border }]}>

@@ -1,20 +1,32 @@
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
-// In Android emulator, 10.0.2.2 maps to the host machine's localhost (127.0.0.1)
-const HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+// Determine host: Physical device via Expo uses Metro host IP, emulator uses 10.0.2.2
+const getHost = (): string => {
+  const hostUri = Constants.expoConfig?.hostUri || (Constants as any)?.manifest2?.extra?.expoClient?.hostUri;
+  if (hostUri) {
+    return hostUri.split(':')[0];
+  }
+  // Default to LAN IP if on physical device / network, fallback to emulator
+  return '192.168.68.59';
+};
 
-export const TRANSLATION_API_BASE_URL = `http://${HOST}:8000`;
+const HOST = getHost();
+
+export const NGROK_TRANSLATION_URL = 'https://nonexterminative-lucinda-gentlemanlike.ngrok-free.dev';
+
+// Live ngrok tunnel for Translation & Speech-to-Speech
+export const TRANSLATION_API_BASE_URL =
+  process.env.EXPO_PUBLIC_TRANSLATION_URL || NGROK_TRANSLATION_URL;
+
 export const BACKEND_API_BASE_URL = `http://${HOST}:8001`;
 
 // ─── Backend URL Configuration ────────────────────────────────────────────────
-// Web / iOS simulator use localhost:8000; Android emulator uses 10.0.2.2:8000
-const DEFAULT_HOST = Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://localhost:8000';
-
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ||
   (typeof window !== 'undefined' && window.location?.hostname
-    ? `http://${window.location.hostname}:8000`
-    : DEFAULT_HOST);
+    ? `http://${window.location.hostname}:8001`
+    : BACKEND_API_BASE_URL);
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 export interface ApiResponse {
@@ -143,6 +155,7 @@ export const translateText = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
       },
       body: JSON.stringify({
         text,
@@ -219,6 +232,7 @@ export const speechToSpeechJson = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
       },
       body: JSON.stringify({
         audio_base64: cleanBase64,
@@ -290,6 +304,9 @@ export const speechToSpeech = async (
 
     const response = await fetch(`${TRANSLATION_API_BASE_URL}/api/sts`, {
       method: 'POST',
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+      },
       body: formData,
     });
 
@@ -328,6 +345,9 @@ export const transcribeAudio = async (
 
     const response = await fetch(`${TRANSLATION_API_BASE_URL}/api/transcribe`, {
       method: 'POST',
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+      },
       body: formData,
     });
 
@@ -444,6 +464,9 @@ export const checkTranslationEngineHealth = async (): Promise<boolean> => {
   try {
     const response = await fetch(`${TRANSLATION_API_BASE_URL}/api/health`, {
       method: 'GET',
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+      },
     });
     return response.ok;
   } catch {

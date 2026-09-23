@@ -132,19 +132,6 @@ export default function HomeScreen() {
             />
           </TouchableOpacity>
         </View>
-        <View style={styles.pillsRow}>
-          {['Best sightseeing places', 'Where to find Chak-hao?', 'Story of Kangla Fort'].map((label) => (
-            <TouchableOpacity
-              key={label}
-              onPress={() => handleAskMeerup(label)}
-              style={[styles.filterPill, { backgroundColor: sectionBg, borderColor: colors.border }]}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="sparkles-outline" size={12} color={colors.accent} />
-              <Text style={[styles.filterPillText, { color: colors.text }]}>{label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
       </View>
 
       {/* ── LIVE TRANSLATION (MEETEILON / MANIPURI) ── */}

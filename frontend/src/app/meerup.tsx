@@ -43,7 +43,7 @@ import { RecommendationCardItem } from '@/components/destination/RecommendationC
 import { LandmarkCameraModal } from '@/components/vision/LandmarkCameraModal';
 
 // ─── Live LLM config ─────────────────────────────────────────────────────────
-const LLM_BASE_URL = 'https://ed24-2405-201-ac01-5153-71fa-7687-e166-fa4c.ngrok-free.app/v1';
+const LLM_BASE_URL = 'https://af1e-2409-40e7-408-6d82-4aef-9aa8-ca50-1f19.ngrok-free.app';
 const LLM_MODEL = 'lmstudio-community/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M';
 
 interface UserContext {
@@ -322,7 +322,7 @@ const AnimatedPulseRing = ({ size, color, delay, active }: { size: number; color
       anim.setValue(0);
       return;
     }
-    
+
     let loop: Animated.CompositeAnimation;
     const timeout = setTimeout(() => {
       anim.setValue(0);
@@ -578,7 +578,7 @@ export default function MeerupScreen() {
               setCardsFilterTitle(`Featured: ${placeName}`);
             }
           })
-          .catch(() => {});
+          .catch(() => { });
       }
     } catch (err: any) {
       console.error('LLM error:', err);
@@ -662,7 +662,7 @@ export default function MeerupScreen() {
             setCardsFilterTitle(`Recommendations: ${result.name}`);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     }
 
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 200);
@@ -678,7 +678,7 @@ export default function MeerupScreen() {
       clearTimeout(silenceTimer.current);
       silenceTimer.current = null;
     }
-    
+
     let uri = '';
     try {
       if (rec && typeof rec.stopAndUnloadAsync === 'function') {
@@ -690,7 +690,7 @@ export default function MeerupScreen() {
     }
     setRecording(null);
     setIsSpeaking(false);
-    
+
     if (!uri) {
       setAiState('idle');
       return;
@@ -699,14 +699,14 @@ export default function MeerupScreen() {
     try {
       // Call STS endpoint
       const response = await speechToSpeech(uri);
-      
+
       if (response.text) {
         const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: '(Voice message sent)', time: 'Just now' };
         const places = parsePlaceMentions(response.text);
-        const aiMsg: ChatMessage = { id: (Date.now()+1).toString(), role: 'ai', text: response.text, time: 'Just now', places };
+        const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'ai', text: response.text, time: 'Just now', places };
         setMessages(prev => [...prev, userMsg, aiMsg]);
       }
-      
+
       setAiState('speaking');
       if (response.audioBase64 && AudioRuntime) {
         const outUri = FileSystem.cacheDirectory + 'sts_response.wav';
@@ -720,13 +720,13 @@ export default function MeerupScreen() {
 
     setTimeout(() => setAiState('idle'), 3000);
   };
-  
+
   const startRecording = async () => {
     if (!AudioRuntime) {
       console.warn("Audio is not available - falling back to simulated UI mode");
       setAiState('listening');
       setIsSpeaking(true);
-      
+
       // User must manually stop recording
 
       return;
@@ -787,7 +787,7 @@ export default function MeerupScreen() {
     setIsMicMuted(willMute);
     if (willMute && aiState === 'listening') {
       if (recording) {
-        try { await recording.stopAndUnloadAsync(); } catch (e) {}
+        try { await recording.stopAndUnloadAsync(); } catch (e) { }
         setRecording(null);
       }
       if (silenceTimer.current) { clearTimeout(silenceTimer.current); silenceTimer.current = null; }
@@ -942,271 +942,271 @@ export default function MeerupScreen() {
           <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.contentContainer}>
 
 
-        {/* CHAT TRANSCRIPT */}
-        <View style={styles.chatContainer}>
-          {messages.length === 0 && (
-            <View style={{ alignItems: 'center', paddingTop: 40, gap: 12 }}>
-              <Text style={{ fontSize: 13, color: '#9CA3AF', textAlign: 'center', lineHeight: 20 }}>
-                Ask MEERUP anything about Manipur’s culture, food, and hidden gems.
-              </Text>
-              {[
-                { icon: 'menu-book', text: 'Tell me the legend of Kangla Sha', color: '#D97706' },
-                { icon: 'restaurant', text: 'Where can I find authentic Chak-hao?', color: '#047857' },
-                { icon: 'festival', text: 'What festivals are happening in Manipur?', color: '#4777c2' },
-              ].map((chip) => (
-                <TouchableOpacity
-                  key={chip.text}
-                  onPress={() => handleSendText(chip.text)}
-                  style={styles.suggestionChip}
-                >
-                  <MaterialIcons name={chip.icon as any} size={16} color={chip.color} />
-                  <Text style={styles.suggestionChipText}>{chip.text}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-          {messages.map((msg) => {
-            if (msg.role === 'user') {
-              return (
-                <View key={msg.id} style={styles.userMessageWrapper}>
-                  {msg.imageUri && (
-                    <Image source={{ uri: msg.imageUri }} style={styles.scannedImageThumb} />
-                  )}
-                  <View style={styles.userBubble}>
-                    <Text style={styles.userMessageText}>{msg.text}</Text>
-                  </View>
-                  <View style={styles.messageFooter}>
-                    <Text style={styles.timeText}>You · {msg.time}</Text>
-                    <MaterialIcons name="done-all" size={13} color="#047857" style={{ marginLeft: 4 }} />
-                  </View>
+            {/* CHAT TRANSCRIPT */}
+            <View style={styles.chatContainer}>
+              {messages.length === 0 && (
+                <View style={{ alignItems: 'center', paddingTop: 40, gap: 12 }}>
+                  <Text style={{ fontSize: 13, color: '#9CA3AF', textAlign: 'center', lineHeight: 20 }}>
+                    Ask MEERUP anything about Manipur’s culture, food, and hidden gems.
+                  </Text>
+                  {[
+                    { icon: 'menu-book', text: 'Tell me the legend of Kangla Sha', color: '#D97706' },
+                    { icon: 'restaurant', text: 'Where can I find authentic Chak-hao?', color: '#047857' },
+                    { icon: 'festival', text: 'What festivals are happening in Manipur?', color: '#4777c2' },
+                  ].map((chip) => (
+                    <TouchableOpacity
+                      key={chip.text}
+                      onPress={() => handleSendText(chip.text)}
+                      style={styles.suggestionChip}
+                    >
+                      <MaterialIcons name={chip.icon as any} size={16} color={chip.color} />
+                      <Text style={styles.suggestionChipText}>{chip.text}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              );
-            } else {
-              return (
-                <View key={msg.id} style={styles.aiMessageWrapper}>
+              )}
+              {messages.map((msg) => {
+                if (msg.role === 'user') {
+                  return (
+                    <View key={msg.id} style={styles.userMessageWrapper}>
+                      {msg.imageUri && (
+                        <Image source={{ uri: msg.imageUri }} style={styles.scannedImageThumb} />
+                      )}
+                      <View style={styles.userBubble}>
+                        <Text style={styles.userMessageText}>{msg.text}</Text>
+                      </View>
+                      <View style={styles.messageFooter}>
+                        <Text style={styles.timeText}>You · {msg.time}</Text>
+                        <MaterialIcons name="done-all" size={13} color="#047857" style={{ marginLeft: 4 }} />
+                      </View>
+                    </View>
+                  );
+                } else {
+                  return (
+                    <View key={msg.id} style={styles.aiMessageWrapper}>
+                      <View style={styles.aiHeader}>
+                        <View style={styles.aiAvatar}>
+                          <MaterialIcons name="arrow-back-ios" size={10} color="#4777c2" style={{ marginLeft: 2 }} />
+                        </View>
+                        <Text style={styles.aiName}>MEERUP Companion</Text>
+                        <Text style={styles.timeText}>{msg.time}</Text>
+                      </View>
+
+                      <View style={styles.aiBubble}>
+                        <Text style={styles.aiMessageText}>{msg.text}</Text>
+
+                        {/* ── Verified Landmark AI Card ── */}
+                        {msg.landmark && (
+                          <View style={styles.landmarkCardBubble}>
+                            <View style={styles.landmarkBadgeHeader}>
+                              <MaterialIcons name="verified" size={16} color="#047857" />
+                              <Text style={styles.landmarkBadgeText}>
+                                Verified Landmark · {Math.round(msg.landmark.confidence * 100)}% Match
+                              </Text>
+                            </View>
+                            {msg.landmark.highlights && msg.landmark.highlights.length > 0 && (
+                              <View style={styles.landmarkHighlightsRow}>
+                                {msg.landmark.highlights.map((h, i) => (
+                                  <View key={i} style={styles.landmarkHighlightPill}>
+                                    <Text style={styles.landmarkHighlightText}>{h}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+                            {msg.landmark.facts && msg.landmark.facts.length > 0 && (
+                              <View style={styles.landmarkFactsList}>
+                                <Text style={styles.landmarkFactsTitle}>Key Facts</Text>
+                                {msg.landmark.facts.slice(0, 3).map((f: string, i: number) => (
+                                  <View key={i} style={styles.landmarkFactItem}>
+                                    <MaterialIcons name="check-circle-outline" size={13} color="#047857" style={{ marginTop: 2 }} />
+                                    <Text style={styles.landmarkFactText}>{f}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+                          </View>
+                        )}
+
+                        {/* ── Grounded Search Sources / Verification Note ── */}
+                        {msg.searchSnippets && msg.searchSnippets.length > 0 && (
+                          <View style={styles.groundedSourcesBubble}>
+                            <View style={styles.groundedSourcesHeader}>
+                              <MaterialIcons name="travel-explore" size={13} color={isDark ? '#60A5FA' : '#2563EB'} />
+                              <Text style={styles.groundedSourcesHeaderText}>
+                                Search + AI Grounded Fact Check
+                              </Text>
+                            </View>
+                            {msg.searchSnippets.slice(0, 2).map((s, idx) => (
+                              <TouchableOpacity
+                                key={idx}
+                                style={styles.snippetItem}
+                                onPress={() => s.url && Linking.openURL(s.url).catch(() => {})}
+                                accessibilityRole="link"
+                              >
+                                <Text style={styles.snippetTitle} numberOfLines={1}>
+                                  • {s.title || 'Travel Guide Source'}
+                                </Text>
+                                <Text style={styles.snippetSnippet} numberOfLines={2}>
+                                  {s.snippet}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        )}
+
+                        {/* ── Clickable place chips with turn-by-turn directions ── */}
+                        {msg.places && msg.places.length > 0 && (
+                          <View style={styles.placesRow}>
+                            <View style={styles.placesHeaderRow}>
+                              <MaterialIcons name="navigation" size={13} color="#047857" />
+                              <Text style={styles.placesLabel}>
+                                {userContext.latitude !== null && userContext.longitude !== null
+                                  ? 'Directions from your location'
+                                  : 'Get Directions'}
+                              </Text>
+                            </View>
+                            {msg.places.map(p => {
+                              const hasLoc = userContext.latitude !== null && userContext.longitude !== null;
+                              const distKm = hasLoc
+                                ? getDistanceKm(userContext.latitude!, userContext.longitude!, p.lat, p.lng)
+                                : null;
+                              const distLabel = distKm !== null
+                                ? distKm < 1
+                                  ? `${Math.round(distKm * 1000)} m`
+                                  : `${distKm.toFixed(1)} km`
+                                : null;
+
+                              return (
+                                <TouchableOpacity
+                                  key={p.name}
+                                  style={styles.placeChip}
+                                  onPress={() =>
+                                    router.push({
+                                      pathname: '/map',
+                                      params: {
+                                        destLat: p.lat.toString(),
+                                        destLng: p.lng.toString(),
+                                        destName: p.name,
+                                      },
+                                    })
+                                  }
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Get directions to ${p.name}`}
+                                >
+                                  <MaterialIcons name="directions" size={14} color="#fff" />
+                                  <Text style={styles.placeChipText}>{p.name}</Text>
+                                  {distLabel && (
+                                    <View style={styles.distanceBadge}>
+                                      <Text style={styles.distanceBadgeText}>{distLabel}</Text>
+                                    </View>
+                                  )}
+                                  <MaterialIcons name="arrow-forward" size={12} color="rgba(255,255,255,0.8)" />
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  );
+                }
+              })}
+              {/* Thinking indicator */}
+              {aiState === 'thinking' && (
+                <View style={styles.aiMessageWrapper}>
                   <View style={styles.aiHeader}>
                     <View style={styles.aiAvatar}>
                       <MaterialIcons name="arrow-back-ios" size={10} color="#4777c2" style={{ marginLeft: 2 }} />
                     </View>
                     <Text style={styles.aiName}>MEERUP Companion</Text>
-                    <Text style={styles.timeText}>{msg.time}</Text>
                   </View>
-      
-                  <View style={styles.aiBubble}>
-                    <Text style={styles.aiMessageText}>{msg.text}</Text>
-
-                    {/* ── Verified Landmark AI Card ── */}
-                    {msg.landmark && (
-                      <View style={styles.landmarkCardBubble}>
-                        <View style={styles.landmarkBadgeHeader}>
-                          <MaterialIcons name="verified" size={16} color="#047857" />
-                          <Text style={styles.landmarkBadgeText}>
-                            Verified Landmark · {Math.round(msg.landmark.confidence * 100)}% Match
-                          </Text>
-                        </View>
-                        {msg.landmark.highlights && msg.landmark.highlights.length > 0 && (
-                          <View style={styles.landmarkHighlightsRow}>
-                            {msg.landmark.highlights.map((h, i) => (
-                              <View key={i} style={styles.landmarkHighlightPill}>
-                                <Text style={styles.landmarkHighlightText}>{h}</Text>
-                              </View>
-                            ))}
-                          </View>
-                        )}
-                        {msg.landmark.facts && msg.landmark.facts.length > 0 && (
-                          <View style={styles.landmarkFactsList}>
-                            <Text style={styles.landmarkFactsTitle}>Key Facts</Text>
-                            {msg.landmark.facts.slice(0, 3).map((f: string, i: number) => (
-                              <View key={i} style={styles.landmarkFactItem}>
-                                <MaterialIcons name="check-circle-outline" size={13} color="#047857" style={{ marginTop: 2 }} />
-                                <Text style={styles.landmarkFactText}>{f}</Text>
-                              </View>
-                            ))}
-                          </View>
-                        )}
-                      </View>
-                    )}
-
-                    {/* ── Grounded Search Sources / Verification Note ── */}
-                    {msg.searchSnippets && msg.searchSnippets.length > 0 && (
-                      <View style={styles.groundedSourcesBubble}>
-                        <View style={styles.groundedSourcesHeader}>
-                          <MaterialIcons name="travel-explore" size={13} color={isDark ? '#60A5FA' : '#2563EB'} />
-                          <Text style={styles.groundedSourcesHeaderText}>
-                            Search + AI Grounded Fact Check
-                          </Text>
-                        </View>
-                        {msg.searchSnippets.slice(0, 2).map((s, idx) => (
-                          <TouchableOpacity
-                            key={idx}
-                            style={styles.snippetItem}
-                            onPress={() => s.url && Linking.openURL(s.url).catch(() => {})}
-                            accessibilityRole="link"
-                          >
-                            <Text style={styles.snippetTitle} numberOfLines={1}>
-                              • {s.title || 'Travel Guide Source'}
-                            </Text>
-                            <Text style={styles.snippetSnippet} numberOfLines={2}>
-                              {s.snippet}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    )}
-
-                    {/* ── Clickable place chips with turn-by-turn directions ── */}
-                    {msg.places && msg.places.length > 0 && (
-                      <View style={styles.placesRow}>
-                        <View style={styles.placesHeaderRow}>
-                          <MaterialIcons name="navigation" size={13} color="#047857" />
-                          <Text style={styles.placesLabel}>
-                            {userContext.latitude !== null && userContext.longitude !== null
-                              ? 'Directions from your location'
-                              : 'Get Directions'}
-                          </Text>
-                        </View>
-                        {msg.places.map(p => {
-                          const hasLoc = userContext.latitude !== null && userContext.longitude !== null;
-                          const distKm = hasLoc
-                            ? getDistanceKm(userContext.latitude!, userContext.longitude!, p.lat, p.lng)
-                            : null;
-                          const distLabel = distKm !== null
-                            ? distKm < 1
-                              ? `${Math.round(distKm * 1000)} m`
-                              : `${distKm.toFixed(1)} km`
-                            : null;
-
-                          return (
-                            <TouchableOpacity
-                              key={p.name}
-                              style={styles.placeChip}
-                              onPress={() =>
-                                router.push({
-                                  pathname: '/map',
-                                  params: {
-                                    destLat: p.lat.toString(),
-                                    destLng: p.lng.toString(),
-                                    destName: p.name,
-                                  },
-                                })
-                              }
-                              accessibilityRole="button"
-                              accessibilityLabel={`Get directions to ${p.name}`}
-                            >
-                              <MaterialIcons name="directions" size={14} color="#fff" />
-                              <Text style={styles.placeChipText}>{p.name}</Text>
-                              {distLabel && (
-                                <View style={styles.distanceBadge}>
-                                  <Text style={styles.distanceBadgeText}>{distLabel}</Text>
-                                </View>
-                              )}
-                              <MaterialIcons name="arrow-forward" size={12} color="rgba(255,255,255,0.8)" />
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-                    )}
+                  <View style={[styles.aiBubble, { paddingVertical: 12 }]}>
+                    <Text style={[styles.aiMessageText, { color: '#9CA3AF', fontStyle: 'italic' }]}>Thinking…</Text>
                   </View>
                 </View>
-              );
-            }
-          })}
-          {/* Thinking indicator */}
-          {aiState === 'thinking' && (
-            <View style={styles.aiMessageWrapper}>
-              <View style={styles.aiHeader}>
-                <View style={styles.aiAvatar}>
-                  <MaterialIcons name="arrow-back-ios" size={10} color="#4777c2" style={{ marginLeft: 2 }} />
-                </View>
-                <Text style={styles.aiName}>MEERUP Companion</Text>
-              </View>
-              <View style={[styles.aiBubble, { paddingVertical: 12 }]}>
-                <Text style={[styles.aiMessageText, { color: '#9CA3AF', fontStyle: 'italic' }]}>Thinking…</Text>
-              </View>
-            </View>
-          )}
+              )}
 
-          {/* ── Nearby & Live Scraped Recommendations ── */}
-          {recommendationCards.length > 0 && (
-            <View style={styles.recommendationsSection}>
-              <View style={styles.recommendationsHeaderRow}>
-                <View style={styles.recommendationsTitleRow}>
-                  <MaterialIcons name="explore" size={18} color="#047857" />
-                  <Text style={styles.recommendationsHeaderTitle}>
-                    {cardsFilterTitle || 'Nearby Destinations & Live Buzz'}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => setShowCards(prev => !prev)}
-                  style={styles.toggleCardsBtn}
-                  accessibilityRole="button"
-                  accessibilityLabel="Toggle recommendation cards"
-                >
-                  <Text style={styles.toggleCardsText}>{showCards ? 'Hide' : 'Show'}</Text>
-                  <MaterialIcons
-                    name={showCards ? 'expand-less' : 'expand-more'}
-                    size={18}
-                    color="#047857"
-                  />
-                </TouchableOpacity>
-              </View>
+              {/* ── Nearby & Live Scraped Recommendations ── */}
+              {recommendationCards.length > 0 && (
+                <View style={styles.recommendationsSection}>
+                  <View style={styles.recommendationsHeaderRow}>
+                    <View style={styles.recommendationsTitleRow}>
+                      <MaterialIcons name="explore" size={18} color="#047857" />
+                      <Text style={styles.recommendationsHeaderTitle}>
+                        {cardsFilterTitle || 'Nearby Destinations & Live Buzz'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => setShowCards(prev => !prev)}
+                      style={styles.toggleCardsBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel="Toggle recommendation cards"
+                    >
+                      <Text style={styles.toggleCardsText}>{showCards ? 'Hide' : 'Show'}</Text>
+                      <MaterialIcons
+                        name={showCards ? 'expand-less' : 'expand-more'}
+                        size={18}
+                        color="#047857"
+                      />
+                    </TouchableOpacity>
+                  </View>
 
-              {showCards && (
-                <View style={styles.cardsList}>
-                  {recommendationCards.map((card) => (
-                    <RecommendationCardItem key={card.id} card={card} />
-                  ))}
+                  {showCards && (
+                    <View style={styles.cardsList}>
+                      {recommendationCards.map((card) => (
+                        <RecommendationCardItem key={card.id} card={card} />
+                      ))}
+                    </View>
+                  )}
                 </View>
               )}
             </View>
-          )}
-        </View>
-
-        
-      </ScrollView>
-
-      {/* BOTTOM INPUT */}
-      <View style={[styles.bottomInputContainer, { paddingBottom: isKeyboardVisible ? 4 : Math.max(insets.bottom, 10) }]}>
 
 
-        <View style={styles.inputRow}>
-          <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() => setCameraModalVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Scan Landmark Camera"
-          >
-            <MaterialIcons name="photo-camera" size={20} color="#4B5563" />
-          </TouchableOpacity>
-          <View style={styles.textInputWrapper}>
-            <TextInput
-              style={styles.textInput}
-              placeholder="Speak or ask MEERUP anything..."
-              placeholderTextColor="#9CA3AF"
-              value={inputText}
-              onChangeText={setInputText}
-              onFocus={() => setIsInputFocused(true)}
-              onBlur={() => setIsInputFocused(false)}
-              onSubmitEditing={() => handleSendText()}
-              returnKeyType="send"
-              editable={aiState !== 'thinking'}
-            />
+          </ScrollView>
+
+          {/* BOTTOM INPUT */}
+          <View style={[styles.bottomInputContainer, { paddingBottom: isKeyboardVisible ? 4 : Math.max(insets.bottom, 10) }]}>
+
+
+            <View style={styles.inputRow}>
+              <TouchableOpacity
+                style={styles.iconBtn}
+                onPress={() => setCameraModalVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Scan Landmark Camera"
+              >
+                <MaterialIcons name="photo-camera" size={20} color="#4B5563" />
+              </TouchableOpacity>
+              <View style={styles.textInputWrapper}>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Speak or ask MEERUP anything..."
+                  placeholderTextColor="#9CA3AF"
+                  value={inputText}
+                  onChangeText={setInputText}
+                  onFocus={() => setIsInputFocused(true)}
+                  onBlur={() => setIsInputFocused(false)}
+                  onSubmitEditing={() => handleSendText()}
+                  returnKeyType="send"
+                  editable={aiState !== 'thinking'}
+                />
+              </View>
+
+              {inputText.trim().length > 0 ? (
+                <TouchableOpacity style={styles.sendBtn} onPress={() => handleSendText()}>
+                  <MaterialIcons name="arrow-upward" size={20} color="#047857" />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.sendBtn} onPress={() => {
+                  setIsMicMuted(false);
+                  setIsVoiceMode(true);
+                }}>
+                  <MaterialIcons name="mic" size={20} color="#4B5563" />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
-
-          {inputText.trim().length > 0 ? (
-            <TouchableOpacity style={styles.sendBtn} onPress={() => handleSendText()}>
-              <MaterialIcons name="arrow-upward" size={20} color="#047857" />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.sendBtn} onPress={() => {
-              setIsMicMuted(false);
-              setIsVoiceMode(true);
-            }}>
-              <MaterialIcons name="mic" size={20} color="#4B5563" />
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
         </>
       )}
 
@@ -1218,50 +1218,50 @@ export default function MeerupScreen() {
 
           {/* Center Content */}
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <View style={styles.orbContainer}>
-          <AnimatedPulseRing size={112} color="#4777c2" delay={0} active={aiState === 'listening'} />
-          <AnimatedPulseRing size={112} color="#4777c2" delay={600} active={aiState === 'listening'} />
-          <AnimatedPulseRing size={112} color="#4777c2" delay={1200} active={aiState === 'listening'} />
-          <TouchableOpacity
-            onPress={toggleListening}
-            style={[
-              styles.orbOuter,
-              aiState === 'idle' && { borderColor: '#E5E7EB', opacity: 0.5 },
-              aiState === 'listening' && { borderColor: '#4777c2' },
-              aiState === 'thinking' && { borderColor: '#D97706' },
-              aiState === 'speaking' && { borderColor: '#047857' },
-            ]}
-          >
-            <View style={[
-              styles.orbInner,
-              aiState === 'idle' && { borderColor: '#E5E7EB' },
-              aiState === 'listening' && { borderColor: '#4777c2' },
-              aiState === 'thinking' && { borderColor: '#D97706' },
-              aiState === 'speaking' && { borderColor: '#047857' },
-            ]}>
-              <MaterialIcons 
-                name="mic" 
-                size={24} 
-                color={
-                  aiState === 'listening' ? '#4777c2' : 
-                  aiState === 'thinking' ? '#D97706' : 
-                  aiState === 'speaking' ? '#047857' : 
-                  '#9CA3AF'
-                } 
-                style={{ marginBottom: 2 }}
-              />
-              <Text style={[
-                styles.orbText,
-                aiState === 'idle' && { color: '#9CA3AF' },
-                aiState === 'listening' && { color: '#4777c2' },
-                aiState === 'thinking' && { color: '#D97706' },
-                aiState === 'speaking' && { color: '#047857' },
-              ]}>
-                {aiState === 'idle' ? 'MEERUP' : aiState.charAt(0).toUpperCase() + aiState.slice(1)}
-              </Text>
+            <View style={styles.orbContainer}>
+              <AnimatedPulseRing size={112} color="#4777c2" delay={0} active={aiState === 'listening'} />
+              <AnimatedPulseRing size={112} color="#4777c2" delay={600} active={aiState === 'listening'} />
+              <AnimatedPulseRing size={112} color="#4777c2" delay={1200} active={aiState === 'listening'} />
+              <TouchableOpacity
+                onPress={toggleListening}
+                style={[
+                  styles.orbOuter,
+                  aiState === 'idle' && { borderColor: '#E5E7EB', opacity: 0.5 },
+                  aiState === 'listening' && { borderColor: '#4777c2' },
+                  aiState === 'thinking' && { borderColor: '#D97706' },
+                  aiState === 'speaking' && { borderColor: '#047857' },
+                ]}
+              >
+                <View style={[
+                  styles.orbInner,
+                  aiState === 'idle' && { borderColor: '#E5E7EB' },
+                  aiState === 'listening' && { borderColor: '#4777c2' },
+                  aiState === 'thinking' && { borderColor: '#D97706' },
+                  aiState === 'speaking' && { borderColor: '#047857' },
+                ]}>
+                  <MaterialIcons
+                    name="mic"
+                    size={24}
+                    color={
+                      aiState === 'listening' ? '#4777c2' :
+                        aiState === 'thinking' ? '#D97706' :
+                          aiState === 'speaking' ? '#047857' :
+                            '#9CA3AF'
+                    }
+                    style={{ marginBottom: 2 }}
+                  />
+                  <Text style={[
+                    styles.orbText,
+                    aiState === 'idle' && { color: '#9CA3AF' },
+                    aiState === 'listening' && { color: '#4777c2' },
+                    aiState === 'thinking' && { color: '#D97706' },
+                    aiState === 'speaking' && { color: '#047857' },
+                  ]}>
+                    {aiState === 'idle' ? 'MEERUP' : aiState.charAt(0).toUpperCase() + aiState.slice(1)}
+                  </Text>
+                </View>
+              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
-        </View>
 
           </View>
 
@@ -1274,7 +1274,7 @@ export default function MeerupScreen() {
               </TouchableOpacity>
 
               {/* Center: Language Toggle */}
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#1F2937', borderRadius: 24, borderWidth: 1, borderColor: '#4B5563', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 1.5 }}
                 onPress={toggleLanguagePair}
               >
@@ -1449,7 +1449,7 @@ const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
     marginTop: 2,
     letterSpacing: 0.5,
   },
-  
+
   // CHAT
   chatTopBar: {
     flexDirection: 'row',

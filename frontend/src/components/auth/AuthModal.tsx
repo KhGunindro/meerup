@@ -169,12 +169,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             >
               {/* Header */}
               <View style={styles.modalHeader}>
-                <View style={styles.brandRow}>
-                  <View style={styles.logoBadge}>
-                    <MaterialIcons name="travel-explore" size={20} color="#fff" />
-                  </View>
-                  <Text style={[styles.brandTitle, { color: colors.text }]}>MEERUP Auth</Text>
-                </View>
                 <TouchableOpacity
                   onPress={handleClose}
                   style={[styles.closeBtn, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}
@@ -409,10 +403,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     {mode === 'login'
                       ? 'Sign In to MEERUP'
                       : mode === 'signup'
-                      ? 'Create Explorer Account'
-                      : mode === 'verify_otp'
-                      ? 'Verify Code & Sign In'
-                      : 'Send Reset Link'}
+                        ? 'Create Explorer Account'
+                        : mode === 'verify_otp'
+                          ? 'Verify Code & Sign In'
+                          : 'Send Reset Link'}
                   </Text>
                 )}
               </TouchableOpacity>

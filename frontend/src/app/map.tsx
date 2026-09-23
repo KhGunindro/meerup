@@ -175,7 +175,8 @@ export default function MapScreen() {
     const dLat = selectedDest.lat;
     const dLng = selectedDest.lng;
     const dName = selectedDest.name.replace(/'/g, "\\'");
-    const CARTO_KEY = process.env.EXPO_PUBLIC_CARTO_API_KEY ?? '';
+    const CARTO_KEY =
+      process.env.EXPO_PUBLIC_CARTO_API_KEY || 'cb1_3uls_1_7874b4335173e85877f26ebd';
 
     // Generate intermediate waypoint for realistic road-like curved path
     const midLat = (uLat + dLat) / 2 + (dLng - uLng) * 0.08;
@@ -445,7 +446,7 @@ export default function MapScreen() {
             }}
           >
             <UrlTile
-              urlTemplate={`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${process.env.EXPO_PUBLIC_CARTO_API_KEY}`}
+              urlTemplate={`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${process.env.EXPO_PUBLIC_CARTO_API_KEY || 'cb1_3uls_1_7874b4335173e85877f26ebd'}`}
               maximumZ={19}
               flipY={false}
             />

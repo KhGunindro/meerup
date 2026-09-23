@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   Image,
   ScrollView,
@@ -61,6 +61,39 @@ export default function HomeScreen() {
   const { location, locationLabel, getFormattedDistance } = useLocation();
   const timeInfo = useMemo(() => getTimeOfDayInfo(), []);
   const [meerupQuery, setMeerupQuery] = useState('');
+  const [realTemp, setRealTemp] = useState<string | null>(null);
+  const [realPeriod, setRealPeriod] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchWeather = async () => {
+      try {
+        const lat = location?.lat || 24.8170; // Default to Imphal
+        const lng = location?.lng || 93.9368;
+        const res = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const temp = Math.round(data.current_weather.temperature);
+          const code = data.current_weather.weathercode;
+          
+          let desc = 'Clear Sky';
+          if (code >= 1 && code <= 2) desc = 'Partly Cloudy';
+          else if (code === 3) desc = 'Overcast';
+          else if (code === 45 || code === 48) desc = 'Misty Fog';
+          else if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) desc = 'Rainy';
+          else if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) desc = 'Snowy';
+          else if (code >= 95) desc = 'Thunderstorms';
+
+          setRealTemp(`${temp}°C`);
+          setRealPeriod(desc);
+        }
+      } catch (err) {
+        console.warn('Weather fetch error:', err);
+      }
+    };
+    fetchWeather();
+  }, [location?.lat, location?.lng]);
 
   const handleAskMeerup = (query?: string) => {
     const text = (query ?? meerupQuery).trim();
@@ -90,7 +123,7 @@ export default function HomeScreen() {
           <View style={[styles.weatherPill, { backgroundColor: sectionBg, borderColor: colors.border }]}>
             <View style={[styles.liveIndicator, { backgroundColor: '#22C55E' }]} />
             <Text style={[styles.weatherText, { color: colors.textSecondary }]}>
-              {timeInfo.temp} · {timeInfo.period}
+              {realTemp || timeInfo.temp} · {realPeriod || timeInfo.period}
             </Text>
           </View>
         </View>

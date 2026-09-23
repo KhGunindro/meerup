@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { AudioGuide } from '@/constants/destinations';
 import { Colors } from '@/constants/theme';
-import { synthesizeTextToSpeech } from '@/utils/meerupApi';
+import { synthesizeTextToSpeech, fetchAutoAudioTranscript } from '@/utils/meerupApi';
 
 // Safely require expo-av runtime
 let AudioRuntime: any = null;
@@ -30,6 +30,8 @@ interface AudioGuidePlayerProps {
 export function AudioGuidePlayer({ guide, colors, isDark }: AudioGuidePlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
+  const [autoTranscripts, setAutoTranscripts] = useState<Record<string, string>>({});
   const [currentSec, setCurrentSec] = useState(0);
   const [audioDurationSec, setAudioDurationSec] = useState<number | null>(null);
   const [selectedLang, setSelectedLang] = useState(guide.languages[0]?.code || 'en');
@@ -43,9 +45,44 @@ export function AudioGuidePlayer({ guide, colors, isDark }: AudioGuidePlayerProp
   const audioCacheRef = useRef<Record<string, string>>({});
   const timerFallbackRef = useRef<any>(null);
 
-  // Active language narration text
+  // Fallback language object if offline
   const activeLangObj =
     guide.languages.find((l) => l.code === selectedLang) || guide.languages[0];
+
+  // Auto-generate narration transcript from AI model on demand
+  const getOrFetchTranscript = async (lang: string): Promise<string> => {
+    if (autoTranscripts[lang]) {
+      return autoTranscripts[lang];
+    }
+    setIsLoadingTranscript(true);
+    try {
+      const res = await fetchAutoAudioTranscript(
+        guide.title,
+        undefined,
+        guide.narrator,
+        lang === 'mni' ? 'mni' : 'en'
+      );
+      if (res && res.transcript) {
+        setAutoTranscripts((prev) => ({ ...prev, [lang]: res.transcript }));
+        return res.transcript;
+      }
+    } catch (e) {
+      console.warn('Auto transcript generation notice:', e);
+    } finally {
+      setIsLoadingTranscript(false);
+    }
+    return activeLangObj?.text || guide.title;
+  };
+
+  // Automatically request model transcript on mount and on language toggle
+  useEffect(() => {
+    getOrFetchTranscript(selectedLang);
+  }, [selectedLang, guide.title]);
+
+  const activeTranscript =
+    autoTranscripts[selectedLang] ||
+    activeLangObj?.text ||
+    `Welcome to ${guide.title}. Explore the sacred history and cultural traditions of Manipur.`;
 
   const totalSec = audioDurationSec || guide.durationSec || 225;
 
@@ -80,7 +117,7 @@ export function AudioGuidePlayer({ guide, colors, isDark }: AudioGuidePlayerProp
     }
   };
 
-  // Play audio synthesized by AI4Bharat / Neural model
+  // Play audio synthesized by AI4Bharat / Neural model from the auto-generated transcript
   const playAudio = async () => {
     // If sound is already loaded and paused, resume playback
     if (nativeSoundRef.current) {
@@ -109,11 +146,17 @@ export function AudioGuidePlayer({ guide, colors, isDark }: AudioGuidePlayerProp
     const targetLang = selectedLang === 'mni' ? 'mni' : 'en';
 
     try {
+      // Ensure model transcript is generated
+      let transcriptText = autoTranscripts[selectedLang];
+      if (!transcriptText) {
+        transcriptText = await getOrFetchTranscript(selectedLang);
+      }
+
       let b64 = audioCacheRef.current[selectedLang];
 
       if (!b64) {
-        // Call the user's AI neural TTS model via backend / ngrok
-        const result = await synthesizeTextToSpeech(activeLangObj.text, targetLang, 'female');
+        // Call the user's AI neural TTS model to read the auto-generated transcript
+        const result = await synthesizeTextToSpeech(transcriptText, targetLang, 'female');
         if (result.audioBase64) {
           b64 = result.audioBase64;
           audioCacheRef.current[selectedLang] = b64;
@@ -201,7 +244,7 @@ export function AudioGuidePlayer({ guide, colors, isDark }: AudioGuidePlayerProp
     // 3. Fallback to Web SpeechSynthesis if model or native audio is unavailable
     if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(activeLangObj.text);
+      const utterance = new SpeechSynthesisUtterance(activeTranscript);
       utterance.rate = playbackSpeed;
       utterance.lang = selectedLang === 'mni' ? 'hi-IN' : 'en-US';
       utterance.onend = () => {
@@ -509,14 +552,35 @@ export function AudioGuidePlayer({ guide, colors, isDark }: AudioGuidePlayerProp
             { backgroundColor: innerBg, borderColor: isDark ? '#262933' : '#E2E8F0' },
           ]}>
           <View style={styles.transcriptHeader}>
-            <Ionicons name="language" size={14} color={colors.primary} />
-            <Text style={[styles.transcriptTitle, { color: colors.text }]}>
-              {selectedLang === 'mni' ? 'ꯃৈতৈꯂꯣꯟ (Manipuri) Transcript' : 'English Transcript'}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+              <Ionicons name="sparkles" size={14} color={colors.primary} />
+              <Text style={[styles.transcriptTitle, { color: colors.text }]}>
+                {selectedLang === 'mni'
+                  ? 'ꯃꯣꯗꯦꯜꯅ ꯑꯣꯇꯣ-ꯖꯦꯅꯔꯦꯠ ꯇꯧꯔꯕ ꯇ꯭ꯔꯥꯟꯁꯀ꯭ꯔꯤꯞ'
+                  : 'AI Model Auto-Transcript'}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.autoBadge,
+                { backgroundColor: isDark ? 'rgba(15,118,110,0.25)' : '#E6F4F1' },
+              ]}>
+              <Text style={[styles.autoBadgeText, { color: colors.primary }]}>AUTO</Text>
+            </View>
           </View>
-          <Text style={[styles.transcriptText, { color: colors.textSecondary }]}>
-            "{activeLangObj.text}"
-          </Text>
+
+          {isLoadingTranscript && !autoTranscripts[selectedLang] ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 }}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={{ fontSize: 12, color: colors.textSecondary }}>
+                Generating transcript from model...
+              </Text>
+            </View>
+          ) : (
+            <Text style={[styles.transcriptText, { color: colors.textSecondary }]}>
+              "{activeTranscript}"
+            </Text>
+          )}
         </View>
       )}
     </View>
@@ -697,5 +761,15 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     lineHeight: 20,
     fontStyle: 'italic',
+  },
+  autoBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  autoBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
 });

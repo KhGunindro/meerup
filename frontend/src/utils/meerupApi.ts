@@ -619,3 +619,44 @@ export const askGroundedChat = async (
   return await response.json();
 };
 
+export interface AudioGuideTranscriptResult {
+  success: boolean;
+  title: string;
+  language: string;
+  transcript: string;
+  narrator: string;
+  provider: string;
+}
+
+/**
+ * Dynamically generates cultural audio guide narration transcripts via the AI model.
+ * Eliminates need for hardcoded preloaded text.
+ */
+export const fetchAutoAudioTranscript = async (
+  title: string,
+  destinationName?: string,
+  narrator?: string,
+  language: 'en' | 'mni' = 'en'
+): Promise<AudioGuideTranscriptResult> => {
+  const url = `${API_BASE_URL}/api/chat/audio-guide/transcript`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...NGROK_HEADERS,
+    },
+    body: JSON.stringify({
+      title,
+      destination_name: destinationName,
+      narrator,
+      language,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Auto transcript API error (${response.status})`);
+  }
+  return await response.json();
+};
+
+

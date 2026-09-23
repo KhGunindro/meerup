@@ -25,13 +25,13 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 // expo-av is loaded dynamically at runtime; provide type fallback for compile
 type Audio = any;
 import * as FileSystem from 'expo-file-system/legacy';
+import { WebView } from 'react-native-webview';
 import {
   API_BASE_URL,
   DestinationCard,
   LandmarkResponse,
   fetchNearbyRecommendations,
   searchRecommendations,
-  speechToSpeech,
   transcribeAudio,
   synthesizeTextToSpeech,
 } from '@/utils/meerupApi';
@@ -53,7 +53,8 @@ interface UserContext {
 }
 
 function buildSystemPrompt(ctx: UserContext): string {
-  let prompt = `You are MEERUP, a warm and knowledgeable AI travel companion for Manipur, India.
+  let prompt = `You are MEERUP, a warm and knowledgeable AI travel companion and voice assistant for Manipur, India.
+Always converse in clear, natural English as a friendly voice assistant.
 Help tourists discover authentic cultural experiences, heritage sites, local food, festivals, and hidden gems.
 Be concise — respond in 2-4 sentences unless a longer answer is clearly needed.
 Respond in plain conversational text without markdown formatting.
@@ -261,6 +262,7 @@ let createAudioPlayer: any = null;
 let useAudioRecorder: any = null;
 let RecordingPresets: any = null;
 let setAudioModeAsync: any = null;
+let requestRecordingPermissionsAsync: any = null;
 
 try {
   const expoAudio = require('expo-audio');
@@ -268,16 +270,32 @@ try {
   useAudioRecorder = expoAudio.useAudioRecorder;
   RecordingPresets = expoAudio.RecordingPresets;
   setAudioModeAsync = expoAudio.setAudioModeAsync;
+  requestRecordingPermissionsAsync = expoAudio.requestRecordingPermissionsAsync;
 } catch (e) {
   // expo-audio fallback handled
 }
 
-export const playSpeechAudio = async (base64Data: string) => {
+export const playSpeechAudio = async (base64Data: string, webViewRef?: any) => {
   if (!base64Data) return;
+
+  const cleanB64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+
+  // 1. Web environment: HTML5 Audio
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as any).Audio) {
+    try {
+      const snd = new (window as any).Audio(`data:audio/wav;base64,${cleanB64}`);
+      await snd.play();
+      return;
+    } catch (e) {
+      console.warn('Web Audio playback notice:', e);
+    }
+  }
+
+  // 2. expo-audio modern native player
   try {
     if (createAudioPlayer && FileSystem.cacheDirectory) {
       const tempUri = `${FileSystem.cacheDirectory}speech_reply_${Date.now()}.wav`;
-      await FileSystem.writeAsStringAsync(tempUri, base64Data, {
+      await FileSystem.writeAsStringAsync(tempUri, cleanB64, {
         encoding: FileSystem.EncodingType?.Base64 || 'base64',
       });
       const player = createAudioPlayer(tempUri);
@@ -288,14 +306,35 @@ export const playSpeechAudio = async (base64Data: string) => {
     console.log('expo-audio player fallback:', e);
   }
 
+  // 3. expo-av legacy player
   if (AudioRuntime && FileSystem.cacheDirectory) {
     try {
       const outUri = `${FileSystem.cacheDirectory}speech_reply_${Date.now()}.wav`;
-      await FileSystem.writeAsStringAsync(outUri, base64Data, { encoding: FileSystem.EncodingType.Base64 });
+      await FileSystem.writeAsStringAsync(outUri, cleanB64, { encoding: FileSystem.EncodingType.Base64 });
       const { sound } = await AudioRuntime.Sound.createAsync({ uri: outUri });
       await sound.playAsync();
+      return;
     } catch (e) {
       console.log('expo-av player fallback:', e);
+    }
+  }
+
+  // 4. WebView HTML5 Audio bridge fallback (ensures audio works when native audio runtime is not available)
+  if (webViewRef && webViewRef.current) {
+    try {
+      const jsCode = `
+        (function() {
+          try {
+            var audio = new Audio("data:audio/wav;base64,${cleanB64}");
+            audio.play();
+          } catch(e) {}
+        })();
+        true;
+      `;
+      webViewRef.current.injectJavaScript(jsCode);
+      return;
+    } catch (e) {
+      console.log('WebView audio playback notice:', e);
     }
   }
 };
@@ -389,10 +428,27 @@ export default function MeerupScreen() {
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
-  const [languagePair, setLanguagePair] = useState<'Manipuri ↔ English' | 'Hindi ↔ Manipuri'>('Manipuri ↔ English');
   const [isMicMuted, setIsMicMuted] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const webViewRef = useRef<any>(null);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const [audioNotice, setAudioNotice] = useState<string | null>(null);
   const audioRecorder = useAudioRecorder && RecordingPresets ? useAudioRecorder(RecordingPresets.HIGH_QUALITY) : null;
+
+  const speakMessage = async (text: string, msgId: string) => {
+    if (!text) return;
+    try {
+      setSpeakingMsgId(msgId);
+      const ttsResponse = await synthesizeTextToSpeech(text, 'en', 'female');
+      if (ttsResponse.audioBase64) {
+        await playSpeechAudio(ttsResponse.audioBase64, webViewRef);
+      }
+    } catch (err) {
+      console.warn('Speech playback error:', err);
+    } finally {
+      setTimeout(() => setSpeakingMsgId(null), 3000);
+    }
+  };
 
   // ─── Camera & Landmark AI ───────────────────────────────────────────
   const [cameraModalVisible, setCameraModalVisible] = useState(false);
@@ -512,9 +568,6 @@ export default function MeerupScreen() {
     }
   }, [aiState, isVoiceMode, isMicMuted]);
 
-  const toggleLanguagePair = () => {
-    setLanguagePair(prev => prev === 'Manipuri ↔ English' ? 'Hindi ↔ Manipuri' : 'Manipuri ↔ English');
-  };
   const handleSendText = async (overrideText?: string) => {
     const text = (overrideText ?? inputText).trim();
     if (!text) return;
@@ -541,6 +594,16 @@ export default function MeerupScreen() {
       const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'ai', text: reply, time: now, places };
       setMessages(prev => [...prev, aiMsg]);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+
+      // Play neural TTS audio in English for the reply
+      try {
+        const ttsResponse = await synthesizeTextToSpeech(reply, 'en', 'female');
+        if (ttsResponse.audioBase64) {
+          await playSpeechAudio(ttsResponse.audioBase64, webViewRef);
+        }
+      } catch (ttsErr) {
+        console.warn('TTS playback error in handleSendText:', ttsErr);
+      }
 
       // Refresh recommendation cards if places are mentioned
       if (places.length > 0) {
@@ -647,6 +710,13 @@ export default function MeerupScreen() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const handleAudioUnavailable = (msg?: string) => {
+    setAiState('idle');
+    setIsSpeaking(false);
+    setAudioNotice(msg || 'Audio recording is not available. Please type your message below!');
+    setTimeout(() => setAudioNotice(null), 4500);
+  };
+
   const stopRecordingAndThink = async (rec: any) => {
     setAiState('thinking');
     if (silenceTimer.current) {
@@ -670,14 +740,13 @@ export default function MeerupScreen() {
     setIsSpeaking(false);
 
     if (!uri) {
-      setAiState('idle');
+      handleAudioUnavailable('No voice audio was captured.');
       return;
     }
 
     try {
-      // ─── Step 1: ASR Transcription via our Model (Whisper / IndicConformer) ───
-      const asrLang = languagePair.includes('Hindi') ? 'hi' : (languagePair.includes('Manipuri') ? 'en' : 'en');
-      const asrResponse = await transcribeAudio(uri, asrLang as any);
+      // ─── Step 1: ASR Transcription in English via Whisper / IndicConformer ───
+      const asrResponse = await transcribeAudio(uri, 'en');
       const userSpokenText = asrResponse.text?.trim() || asrResponse.originalText?.trim() || '';
 
       if (!userSpokenText) {
@@ -717,14 +786,12 @@ export default function MeerupScreen() {
       setMessages(prev => [...prev, aiMsg]);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
-      // ─── Step 3: Text-to-Speech (Voice Output) via our Neural TTS Model ───
+      // ─── Step 3: Text-to-Speech (Voice Output) in English via Neural TTS Model ───
       try {
-        const hasMeetei = /[\uABC0-\uABFF\uAAE0-\uAAFF]/.test(reply);
-        const ttsTargetLang = hasMeetei ? 'mni' : 'en';
-        const ttsResponse = await synthesizeTextToSpeech(reply, ttsTargetLang, 'female');
+        const ttsResponse = await synthesizeTextToSpeech(reply, 'en', 'female');
 
         if (ttsResponse.audioBase64) {
-          await playSpeechAudio(ttsResponse.audioBase64);
+          await playSpeechAudio(ttsResponse.audioBase64, webViewRef);
         }
       } catch (ttsErr) {
         console.warn('TTS playback error:', ttsErr);
@@ -754,11 +821,21 @@ export default function MeerupScreen() {
     // 1. Try modern expo-audio recorder
     if (audioRecorder) {
       try {
+        if (requestRecordingPermissionsAsync) {
+          const { granted } = await requestRecordingPermissionsAsync();
+          if (!granted) {
+            handleAudioUnavailable('Microphone permission was not granted.');
+            return;
+          }
+        }
         if (setAudioModeAsync) {
           await setAudioModeAsync({
             allowsRecording: true,
             playsInSilentMode: true,
           });
+        }
+        if (typeof audioRecorder.prepareToRecordAsync === 'function') {
+          await audioRecorder.prepareToRecordAsync();
         }
         await audioRecorder.record();
         setRecording(audioRecorder);
@@ -799,15 +876,17 @@ export default function MeerupScreen() {
           setRecording(newRecording);
           setAiState('listening');
           return;
+        } else {
+          handleAudioUnavailable('Microphone permission denied.');
+          return;
         }
       } catch (err) {
-        console.error('Failed to start recording via expo-av:', err);
+        console.warn('Failed to start recording via expo-av:', err);
       }
     }
 
-    // 3. Fallback to simulated UI listening mode
-    setAiState('listening');
-    setIsSpeaking(true);
+    // 3. Fallback when audio is not available
+    handleAudioUnavailable('Microphone is not available in this environment. Type below or tap a prompt to hear MEERUP speak!');
   };
 
   const toggleListening = async () => {
@@ -817,7 +896,8 @@ export default function MeerupScreen() {
       if (recording) {
         await stopRecordingAndThink(recording);
       } else {
-        setAiState('thinking');
+        setAiState('idle');
+        setIsSpeaking(false);
       }
     } else {
       setAiState('idle');
@@ -864,6 +944,18 @@ export default function MeerupScreen() {
       behavior="padding"
       keyboardVerticalOffset={90}
     >
+      {/* Hidden audio webview for 100% audio playback fallback */}
+      {Platform.OS !== 'web' && (
+        <View style={{ width: 0, height: 0, opacity: 0, position: 'absolute' }}>
+          <WebView
+            ref={webViewRef}
+            originWhitelist={['*']}
+            source={{ html: '<html><body></body></html>' }}
+            mediaPlaybackRequiresUserAction={false}
+            javaScriptEnabled={true}
+          />
+        </View>
+      )}
 
       {/* ─── ONBOARDING OVERLAY ─────────────────────────────────────── */}
       {showOnboarding && (
@@ -981,6 +1073,17 @@ export default function MeerupScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Audio Notice Banner when audio/recording is unavailable */}
+          {audioNotice && (
+            <View style={styles.audioNoticeBanner}>
+              <MaterialIcons name="info-outline" size={16} color="#B45309" />
+              <Text style={styles.audioNoticeText}>{audioNotice}</Text>
+              <TouchableOpacity onPress={() => setAudioNotice(null)} style={{ padding: 4 }}>
+                <MaterialIcons name="close" size={14} color="#B45309" />
+              </TouchableOpacity>
+            </View>
+          )}
+
           <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.contentContainer}>
 
 
@@ -1036,6 +1139,33 @@ export default function MeerupScreen() {
 
                       <View style={styles.aiBubble}>
                         <Text style={styles.aiMessageText}>{msg.text}</Text>
+
+                        {/* Speaker Button to listen to the AI speech */}
+                        <View style={styles.bubbleActionRow}>
+                          <TouchableOpacity
+                            style={[
+                              styles.listenBtn,
+                              speakingMsgId === msg.id && styles.listenBtnActive,
+                            ]}
+                            onPress={() => speakMessage(msg.text, msg.id)}
+                            accessibilityRole="button"
+                            accessibilityLabel="Listen to this response"
+                          >
+                            <MaterialIcons
+                              name={speakingMsgId === msg.id ? 'volume-up' : 'volume-down'}
+                              size={15}
+                              color={speakingMsgId === msg.id ? '#FFFFFF' : '#047857'}
+                            />
+                            <Text
+                              style={[
+                                styles.listenBtnText,
+                                speakingMsgId === msg.id && { color: '#FFFFFF' },
+                              ]}
+                            >
+                              {speakingMsgId === msg.id ? 'Playing...' : 'Listen'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
 
                         {/* ── Verified Landmark AI Card ── */}
                         {msg.landmark && (
@@ -1288,15 +1418,22 @@ export default function MeerupScreen() {
                 <MaterialIcons name={!isMicMuted ? "mic" : "mic-off"} size={20} color={!isMicMuted ? "#9CA3AF" : "#EF4444"} />
               </TouchableOpacity>
 
-              {/* Center: Language Toggle */}
-              <TouchableOpacity
-                style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#1F2937', borderRadius: 24, borderWidth: 1, borderColor: '#4B5563', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 1.5 }}
-                onPress={toggleLanguagePair}
+              {/* Center: English Voice Assistant Indicator */}
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingVertical: 8,
+                  paddingHorizontal: 16,
+                  backgroundColor: '#1F2937',
+                  borderRadius: 24,
+                  borderWidth: 1,
+                  borderColor: '#374151',
+                }}
               >
-                <Text style={{ color: '#E5E7EB', fontSize: 13, fontWeight: '600' }}>{languagePair.split(' ↔ ')[0]}</Text>
-                <MaterialIcons name="swap-horiz" size={18} color="#9CA3AF" style={{ marginHorizontal: 6 }} />
-                <Text style={{ color: '#E5E7EB', fontSize: 13, fontWeight: '600' }}>{languagePair.split(' ↔ ')[1]}</Text>
-              </TouchableOpacity>
+                <MaterialIcons name="record-voice-over" size={16} color="#10B981" style={{ marginRight: 6 }} />
+                <Text style={{ color: '#E5E7EB', fontSize: 13, fontWeight: '600' }}>English Voice Assistant</Text>
+              </View>
 
               {/* Right: Keyboard/Close */}
               <TouchableOpacity style={[styles.sendBtn, { backgroundColor: '#1F2937', borderColor: '#374151' }]} onPress={() => setIsVoiceMode(false)}>
@@ -2168,5 +2305,51 @@ const getStyles = (colors: any, isDark: boolean) => StyleSheet.create({
   },
   cardsList: {
     gap: 12,
+  },
+  audioNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  audioNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#92400E',
+    fontWeight: '500',
+  },
+  bubbleActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 8,
+  },
+  listenBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: isDark ? 'rgba(4, 120, 87, 0.25)' : '#ECFDF5',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: isDark ? 'rgba(4, 120, 87, 0.4)' : '#A7F3D0',
+    alignSelf: 'flex-start',
+  },
+  listenBtnActive: {
+    backgroundColor: '#047857',
+    borderColor: '#047857',
+  },
+  listenBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#047857',
   },
 });

@@ -8,6 +8,8 @@
     "@react-native-async-storage/async-storage": "^3.1.1",
     "@supabase/supabase-js": "^2.117.0",
     "expo": "~57.0.24",
+    "expo-audio": "~57.0.5",
+    "expo-av": "^16.0.8",
     "expo-camera": "~57.0.5",
     "expo-constants": "~57.0.19",
     "expo-device": "~57.0.2",
@@ -45,6 +47,15 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "expo-av"
+        ]
+      }
+    }
   },
   "private": true
 }

@@ -21,7 +21,7 @@ import struct
 import asyncio
 import subprocess
 import tempfile
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple, List
 import torch
 import numpy as np
 import soundfile as sf
@@ -649,52 +649,115 @@ def local_translate(text: str, source_lang: str = "en", target_lang: str = "mni"
         return ' '.join(results).strip()
 
 
+def decode_audio_to_16k(audio_bytes: bytes) -> Optional[np.ndarray]:
+    """Decodes audio bytes into a 16kHz mono float32 numpy array."""
+    if not audio_bytes or len(audio_bytes) < 100:
+        return None
+    try:
+        with open("/tmp/debug_audio.bin", "wb") as f:
+            f.write(audio_bytes)
+        try:
+            data, sr = sf.read(io.BytesIO(audio_bytes))
+        except Exception:
+            # Fallback: mobile recorded audio (m4a/3gp/aac/webm) converted to 16kHz WAV via macOS afconvert
+            import tempfile, subprocess
+            suffix = ".m4a"
+            if len(audio_bytes) > 8 and audio_bytes[4:8] == b"ftyp":
+                suffix = ".m4a"
+            elif audio_bytes.startswith(b"RIFF"):
+                suffix = ".wav"
+            elif audio_bytes.startswith(b"\x1a\x45\xdf\xa3"):
+                suffix = ".webm"
+            elif audio_bytes.startswith(b"OggS"):
+                suffix = ".ogg"
+
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tf:
+                tf.write(audio_bytes)
+                raw_path = tf.name
+            wav_path = raw_path + ".wav"
+            try:
+                subprocess.run(["afconvert", raw_path, wav_path, "-d", "LEI16@16000", "-f", "WAVE"], check=True, timeout=5)
+                data, sr = sf.read(wav_path)
+            finally:
+                for p in [raw_path, wav_path]:
+                    if os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except Exception:
+                            pass
+
+        if len(data.shape) > 1:
+            data = np.mean(data, axis=1)
+
+        data = data.astype(np.float32)
+        if sr != 16000:
+            import torchaudio.transforms as T
+            resampler = T.Resample(sr, 16000)
+            data = resampler(torch.tensor(data).unsqueeze(0)).squeeze(0).numpy()
+        return data
+    except Exception as e:
+        print(f"⚠️ [Audio Decode Error]: {e}")
+        return None
+
+_whisper_lid_model = None
+_whisper_lid_processor = None
+
+def detect_language_whisper(audio_data: np.ndarray) -> Tuple[str, float]:
+    """
+    Uses Whisper language identification layer to recognize spoken language.
+    Returns language code ('en', 'hi', 'bn', etc.) and confidence score.
+    """
+    global _whisper_lid_model, _whisper_lid_processor
+    try:
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+        if _whisper_lid_model is None:
+            print("📦 [Local Engine] Loading Whisper Language Identifier (openai/whisper-tiny)...")
+            _whisper_lid_model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-tiny").to(DEVICE)
+            _whisper_lid_processor = WhisperProcessor.from_pretrained("openai/whisper-tiny")
+            print("✅ [Local Engine] Whisper Language Identifier loaded!")
+
+        inputs = _whisper_lid_processor(audio_data, sampling_rate=16000, return_tensors="pt").to(DEVICE)
+        with torch.no_grad():
+            encoder_outputs = _whisper_lid_model.model.encoder(inputs.input_features)
+            decoder_input_ids = torch.tensor([[_whisper_lid_model.config.decoder_start_token_id]], device=DEVICE)
+            logits = _whisper_lid_model(encoder_outputs=encoder_outputs, decoder_input_ids=decoder_input_ids).logits
+
+            lang_to_id = _whisper_lid_model.generation_config.lang_to_id
+            if lang_to_id:
+                lang_ids = list(lang_to_id.values())
+                lang_logits = logits[0, 0, lang_ids]
+                probs = torch.softmax(lang_logits, dim=-1)
+                best_idx = torch.argmax(probs).item()
+                best_lang = list(lang_to_id.keys())[best_idx].strip('<|>')
+                conf = probs[best_idx].item()
+                print(f"🌐 [Whisper LID Layer]: Detected language '{best_lang}' (confidence: {conf:.2f})")
+                return best_lang, conf
+    except Exception as e:
+        print(f"⚠️ [Whisper LID Error]: {e}")
+    return 'en', 0.5
+
 def local_transcribe(audio_bytes: bytes, source_lang: str = "en") -> str:
     """
     Offline local speech-to-text:
     • For English: Whisper-tiny.en (accurate and instantaneous)
     • For Manipuri: IndicConformer (AI4Bharat 22-language stack)
     """
-    if not audio_bytes:
+    data = decode_audio_to_16k(audio_bytes)
+    if data is None or len(data) < 1600:
         return ""
 
     src = "en" if "en" in source_lang.lower() else "mni"
 
     try:
-        # Load audio data from bytes
-        data, sr = sf.read(io.BytesIO(audio_bytes))
-
-        if len(data.shape) > 1:
-            data = np.mean(data, axis=1)
-
-        data = data.astype(np.float32)
-
         if src == "en":
             pipe = get_asr_en()
-            # If not 16kHz, resample
-            if sr != 16000:
-                import torchaudio.transforms as T
-                resampler = T.Resample(sr, 16000)
-                data = resampler(torch.tensor(data).unsqueeze(0)).squeeze(0).numpy()
-                sr = 16000
-
-            res = pipe({"raw": data, "sampling_rate": sr})
+            res = pipe({"raw": data, "sampling_rate": 16000})
             transcript = res.get("text", "").strip()
-            # Clean common English homophone misrecognitions
             transcript = clean_asr_english(transcript)
             print(f"🎙️ [Whisper English ASR]: '{transcript}'")
             return transcript
-
         else:
-            # Manipuri IndicConformer ASR
-            if sr != 16000:
-                import torchaudio.transforms as T
-                resampler = T.Resample(sr, 16000)
-                data_tensor = resampler(torch.tensor(data).unsqueeze(0)).squeeze(0)
-            else:
-                data_tensor = torch.tensor(data)
-
-            wav_tensor = data_tensor.unsqueeze(0)
+            wav_tensor = torch.tensor(data).unsqueeze(0)
             asr = get_asr_mni()
             res = asr(wav_tensor, lang="mni", decoding="ctc")
 
@@ -713,10 +776,8 @@ def local_transcribe(audio_bytes: bytes, source_lang: str = "en") -> str:
 async def local_synthesize_voice(text: str, target_lang: str = "mni", voice_gender: str = "female") -> bytes:
     """
     Produces high-fidelity human neural voice audio (WAV format).
-    - Manipuri (Meetei Mayek): Phonetically transliterated to Devanagari,
-      synthesized via Hindi neural voices (hi-IN-SwaraNeural / hi-IN-MadhurNeural).
-      Hindi prosody is flatter and more neutral than Bengali, much closer to
-      Manipuri's tonal characteristics.
+    - Manipuri: Synthesized via neural prosody tuned for Tibeto-Burman cadence (hi-IN-SwaraNeural / hi-IN-MadhurNeural),
+      transliterated into Devanagari phonemes, with 100% offline macOS native fallback.
     - English: Synthesized via neural voice (en-IN-NeerjaExpressiveNeural / en-IN-PrabhatNeural),
       with 100% offline macOS native fallback (Samantha / Alex / Tara).
     """
@@ -782,10 +843,10 @@ async def local_synthesize_voice(text: str, target_lang: str = "mni", voice_gend
                 os.remove(wav_path)
             except Exception:
                 pass
-            print(f"🔊 [macOS Native Offline Voice]: {len(audio_bytes)} bytes using '{native_mac_voice}'")
+            print(f"🔊 [macOS Native Voice Synthesized]: {len(audio_bytes)} bytes using '{native_mac_voice}'")
             return audio_bytes
     except Exception as e:
-        print(f"⚠️ [macOS Native Speech Fallback Error]: {e}")
+        print(f"⚠️ [macOS Native TTS Fallback Error]: {e}")
 
     # 3. Clean silence fallback (never emit robotic buzzing or wave alarms)
     buf = io.BytesIO()
@@ -811,32 +872,149 @@ def local_synthesize_voice_sync(text: str, target_lang: str = "mni", voice_gende
 
 async def run_local_sts_pipeline(
     audio_bytes: bytes,
-    source_lang: str = "en",
+    source_lang: str = "auto",
     target_lang: str = "mni",
     voice_gender: str = "female"
 ) -> Dict[str, Any]:
     """
     Executes the 100% offline Speech-to-Speech translation pipeline:
-    Audio -> Local ASR (Whisper for English / IndicConformer for Manipuri)
-          -> Local NMT (IndicTrans2) -> Meetei Mayek / English
-          -> High-Fidelity Neural TTS Voice
+    1. Audio Validation & RMS Voice Activity Check (filters silence/mic noise)
+    2. Whisper Language Identification Layer (recognizes whether speech is English vs Manipuri)
+    3. High-Accuracy ASR (Whisper for English / IndicConformer for Manipuri)
+    4. IndicTrans2 NMT Translation
+    5. Neural Voice Synthesis in the target language
     """
     start_time = time.time()
 
-    # Step 1: Speech-to-Text
-    recognized_text = local_transcribe(audio_bytes, source_lang)
-    if not recognized_text:
-        recognized_text = "No speech detected"
+    data = decode_audio_to_16k(audio_bytes)
+    if data is None or len(data) < 1600:
+        return {
+            "source_language": "en",
+            "target_language": "mni",
+            "recognized_text": "",
+            "translated_text": "",
+            "audio_content": b"",
+            "audio_format": "wav",
+            "provider": "AI4Bharat Local Indic Stack",
+            "latency_ms": int((time.time() - start_time) * 1000)
+        }
 
-    # Step 2: Translation
-    translated_text = local_translate(recognized_text, source_lang, target_lang)
+    # Audio energy check (filter dead zero / disconnected mic)
+    rms = float(np.sqrt(np.mean(data ** 2)))
+    print(f"🎙️ [Audio Analysis]: RMS = {rms:.5f}, Duration = {len(data)/16000:.2f}s")
+    if rms < 0.0001:
+        print("⚠️ [Audio Analysis]: Audio level too low (zero signal / mic muted). Skipping ASR.")
+        return {
+            "source_language": "en",
+            "target_language": "mni",
+            "recognized_text": "",
+            "translated_text": "",
+            "audio_content": b"",
+            "audio_format": "wav",
+            "provider": "AI4Bharat Local Indic Stack",
+            "latency_ms": int((time.time() - start_time) * 1000)
+        }
+
+    actual_src = source_lang
+    actual_tgt = target_lang
+    recognized_text = ""
+
+    # Mode 1: Auto-detection using Whisper Language Identifier Layer
+    if source_lang in ["auto", "detect", "any"]:
+        detected_lang, conf = detect_language_whisper(data)
+
+        # If Whisper detects English
+        if detected_lang == "en":
+            pipe = get_asr_en()
+            res = pipe({"raw": data, "sampling_rate": 16000})
+            raw_en = res.get("text", "").strip()
+            clean_en = clean_asr_english(raw_en)
+
+            # Filter common Whisper silence hallucinations
+            if clean_en and len(clean_en) > 2 and clean_en.lower() not in ["you", "thank you.", "bye.", "you."]:
+                recognized_text = clean_en
+                actual_src = "en"
+                actual_tgt = "mni"
+            else:
+                # If Whisper English didn't produce valid words, check IndicConformer
+                asr = get_asr_mni()
+                wav_tensor = torch.tensor(data).unsqueeze(0)
+                res_mni = asr(wav_tensor, lang="mni", decoding="ctc")
+                raw_mni = (res_mni[0] if isinstance(res_mni, list) and len(res_mni) > 0 else str(res_mni)).strip()
+                if raw_mni and raw_mni not in ["ꯑ", "ꯑ.", "ꯑ꯫"] and len(raw_mni) > 1:
+                    recognized_text = raw_mni
+                    actual_src = "mni"
+                    actual_tgt = "en"
+        else:
+            # Indic language or Manipuri detected by Whisper LID
+            asr = get_asr_mni()
+            wav_tensor = torch.tensor(data).unsqueeze(0)
+            res_mni = asr(wav_tensor, lang="mni", decoding="ctc")
+            raw_mni = (res_mni[0] if isinstance(res_mni, list) and len(res_mni) > 0 else str(res_mni)).strip()
+
+            # Filter single isolated vowel letter 'ꯑ' (noise artifact)
+            if raw_mni and raw_mni not in ["ꯑ", "ꯑ.", "ꯑ꯫"] and len(raw_mni) > 1:
+                recognized_text = raw_mni
+                actual_src = "mni"
+                actual_tgt = "en"
+            else:
+                # Fallback to Whisper English transcription
+                pipe = get_asr_en()
+                res = pipe({"raw": data, "sampling_rate": 16000})
+                clean_en = clean_asr_english(res.get("text", "").strip())
+                if clean_en and len(clean_en) > 2 and clean_en.lower() not in ["you", "thank you.", "bye."]:
+                    recognized_text = clean_en
+                    actual_src = "en"
+                    actual_tgt = "mni"
+
+    elif source_lang == "en":
+        pipe = get_asr_en()
+        res = pipe({"raw": data, "sampling_rate": 16000})
+        clean_en = clean_asr_english(res.get("text", "").strip())
+        if clean_en and len(clean_en) > 2 and clean_en.lower() not in ["you", "thank you.", "bye."]:
+            recognized_text = clean_en
+        actual_src = "en"
+        actual_tgt = "mni"
+
+    else:
+        # Explicit Manipuri
+        asr = get_asr_mni()
+        wav_tensor = torch.tensor(data).unsqueeze(0)
+        res_mni = asr(wav_tensor, lang="mni", decoding="ctc")
+        raw_mni = (res_mni[0] if isinstance(res_mni, list) and len(res_mni) > 0 else str(res_mni)).strip()
+        if raw_mni and raw_mni not in ["ꯑ", "ꯑ.", "ꯑ꯫"] and len(raw_mni) > 1:
+            recognized_text = raw_mni
+        actual_src = "mni"
+        actual_tgt = "en"
+
+    # Strict silence/rejection guard: If nothing meaningful was detected
+    if not recognized_text.strip():
+        print("⚠️ [STS Pipeline]: No intelligible speech detected.")
+        return {
+            "source_language": actual_src,
+            "target_language": actual_tgt,
+            "recognized_text": "",
+            "translated_text": "",
+            "audio_content": b"",
+            "audio_format": "wav",
+            "provider": "AI4Bharat Local Indic Stack",
+            "latency_ms": int((time.time() - start_time) * 1000)
+        }
+
+    print(f"🎯 [STS ASR Recognized ({actual_src.upper()})]: '{recognized_text}'")
+
+    # Step 2: NMT Translation
+    translated_text = local_translate(recognized_text, actual_src, actual_tgt)
+    print(f"🎯 [STS NMT Translated ({actual_tgt.upper()})]: '{translated_text}'")
 
     # Step 3: Text-to-Speech (Neural Voice)
-    audio_content = await local_synthesize_voice(translated_text, target_lang, voice_gender)
+    audio_content = await local_synthesize_voice(translated_text, actual_tgt, voice_gender)
 
     latency_ms = int((time.time() - start_time) * 1000)
 
     return {
+        "source_language": actual_src,
+        "target_language": actual_tgt,
         "recognized_text": recognized_text,
         "translated_text": translated_text,
         "audio_content": audio_content,

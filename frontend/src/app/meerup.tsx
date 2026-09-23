@@ -21,7 +21,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 // expo-av is loaded dynamically at runtime; provide type fallback for compile
 type Audio = any;
 import * as FileSystem from 'expo-file-system/legacy';
@@ -252,7 +252,7 @@ let AudioRuntime: typeof Audio | any;
 try {
   AudioRuntime = require('expo-av').Audio;
 } catch (e) {
-  console.warn("expo-av native module not found. Audio features will be disabled.");
+  console.info("expo-av native module not found. Audio features will be disabled.");
 }
 import { Colors } from '@/constants/theme';
 
@@ -329,6 +329,8 @@ type LLMHistory = Array<{ role: 'user' | 'assistant'; content: string }>;
 
 export default function MeerupScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ prompt?: string }>();
+  const initialPromptHandled = useRef<string | null>(null);
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
@@ -420,6 +422,31 @@ export default function MeerupScreen() {
     }
     setLocLoading(false);
   };
+
+  useEffect(() => {
+    // Automatically detect real location if permissions exist
+    (async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setUserContext(prev => ({
+            ...prev,
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+          }));
+          const geo = await Location.reverseGeocodeAsync(loc.coords);
+          if (geo[0]) {
+            setLocationLabel(`${geo[0].district || geo[0].city || 'Your location'}, Manipur`);
+          } else {
+            setLocationLabel('Location detected');
+          }
+        }
+      } catch (e) {
+        // Silently fail if not yet permitted
+      }
+    })();
+  }, []);
 
   const finishOnboarding = () => setShowOnboarding(false);
 
@@ -515,6 +542,14 @@ export default function MeerupScreen() {
     };
     loadInitialCards();
   }, [userContext.latitude, userContext.longitude]);
+
+  useEffect(() => {
+    if (params.prompt && initialPromptHandled.current !== params.prompt) {
+      initialPromptHandled.current = params.prompt;
+      setShowOnboarding(false);
+      handleSendText(params.prompt);
+    }
+  }, [params.prompt]);
 
   // ─── Landmark Detection Handler ──────────────────────────────────────
   const handleLandmarkDetected = (result: LandmarkResponse, photoUri?: string) => {

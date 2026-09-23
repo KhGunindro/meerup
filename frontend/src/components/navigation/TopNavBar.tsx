@@ -13,15 +13,22 @@ import { router } from 'expo-router';
 
 import { Colors, MaxContentWidth } from '@/constants/theme';
 
+import { Ionicons } from '@expo/vector-icons';
+
 export function TopNavBar() {
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const isDark = scheme === 'dark';
 
   const topPadding = Platform.OS === 'web' ? 14 : Math.max(insets.top, 12) + 6;
 
   const handleAvatarPress = () => {
     router.push('/profile');
+  };
+
+  const handleTranslatePress = () => {
+    router.push('/conversation');
   };
 
   return (
@@ -44,23 +51,41 @@ export function TopNavBar() {
           </View>
         </View>
 
-        {/* Right: Explorer Profile Avatar */}
-        <Pressable
-          onPress={handleAvatarPress}
-          style={({ pressed }) => [
-            styles.avatarPressable,
-            pressed && styles.pressed,
-          ]}
-          accessibilityLabel="Open user profile"
-          accessibilityRole="button">
-          <View style={[styles.avatarRing, { borderColor: colors.border }]}>
-            <Image
-              source={require('@/assets/images/explorer-avatar.jpg')}
-              style={styles.avatarImage}
-              resizeMode="cover"
-            />
-          </View>
-        </Pressable>
+        {/* Right Actions: Translate Button + Explorer Profile Avatar */}
+        <View style={styles.rightActions}>
+          <Pressable
+            onPress={handleTranslatePress}
+            style={({ pressed }) => [
+              styles.translateBtn,
+              {
+                backgroundColor: isDark ? '#064E3B30' : '#ECFDF5',
+                borderColor: isDark ? '#05966960' : '#A7F3D0',
+              },
+              pressed && styles.pressed,
+            ]}
+            accessibilityLabel="Open Speech-to-Speech Translator"
+            accessibilityRole="button">
+            <Ionicons name="language" size={15} color={colors.primary} />
+            <Text style={[styles.translateBtnText, { color: colors.primary }]}>Translate</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={handleAvatarPress}
+            style={({ pressed }) => [
+              styles.avatarPressable,
+              pressed && styles.pressed,
+            ]}
+            accessibilityLabel="Open user profile"
+            accessibilityRole="button">
+            <View style={[styles.avatarRing, { borderColor: colors.border }]}>
+              <Image
+                source={require('@/assets/images/explorer-avatar.jpg')}
+                style={styles.avatarImage}
+                resizeMode="cover"
+              />
+            </View>
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -138,6 +163,25 @@ const styles = StyleSheet.create({
   avatarImage: {
     width: '100%',
     height: '100%',
+  },
+  rightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  translateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  translateBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   pressed: {
     opacity: 0.75,

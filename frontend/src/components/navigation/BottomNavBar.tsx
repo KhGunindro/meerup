@@ -36,11 +36,11 @@ const TAB_CONFIGS: Record<string, TabConfig> = {
     activeIcon: 'home',
     inactiveIcon: 'home-outline',
   },
-  explore: {
-    name: 'explore',
-    label: 'Explore',
-    activeIcon: 'compass',
-    inactiveIcon: 'compass-outline',
+  conversation: {
+    name: 'conversation',
+    label: 'Translate',
+    activeIcon: 'mic',
+    inactiveIcon: 'mic-outline',
   },
   meerup: {
     name: 'meerup',
@@ -48,6 +48,12 @@ const TAB_CONFIGS: Record<string, TabConfig> = {
     activeIcon: 'sparkles',
     inactiveIcon: 'sparkles-outline',
     isSpecial: true,
+  },
+  explore: {
+    name: 'explore',
+    label: 'Explore',
+    activeIcon: 'compass',
+    inactiveIcon: 'compass-outline',
   },
   map: {
     name: 'map',

@@ -16,6 +16,7 @@ import { Colors, MaxContentWidth } from '@/constants/theme';
 import { getDestImg } from '@/constants/images';
 import { DESTINATIONS } from '@/constants/destinations';
 import { openTurnByTurnNavigation } from '@/utils/navigation';
+import { useLocation } from '@/hooks/use-location';
 
 
 const FILTERS = ['All', 'Sacred Sites', 'Nature', 'Markets', 'Food', 'Festivals'] as const;
@@ -27,6 +28,7 @@ export default function ExploreScreen() {
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const isDark = scheme === 'dark';
   const router = useRouter();
+  const { location, getFormattedDistance } = useLocation();
 
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
   const [searchText, setSearchText] = useState('');
@@ -139,7 +141,9 @@ export default function ExploreScreen() {
                 <View style={styles.destMeta}>
                   <View style={styles.metaChip}>
                     <Ionicons name="location-outline" size={12} color={colors.primary} />
-                    <Text style={[styles.metaText, { color: colors.textSecondary }]}>{dest.dist}</Text>
+                    <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                      {getFormattedDistance(dest.lat, dest.lng, dest.dist)}
+                    </Text>
                   </View>
                   <View style={styles.metaChip}>
                     <Ionicons name="time-outline" size={12} color={colors.primary} />

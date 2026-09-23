@@ -17,6 +17,7 @@ import { Colors } from '@/constants/theme';
 import { getDestImg } from '@/constants/images';
 import { findDestination } from '@/constants/destinations';
 import { openTurnByTurnNavigation, openLocationPin } from '@/utils/navigation';
+import { useLocation } from '@/hooks/use-location';
 import { AudioGuidePlayer } from '@/components/destination/AudioGuidePlayer';
 import { ArExperienceCard } from '@/components/destination/ArExperienceCard';
 
@@ -32,6 +33,7 @@ export default function DestinationDetail() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const isDark = scheme === 'dark';
+  const { location, getFormattedDistance } = useLocation();
 
   const [tab, setTab] = useState<Tab>('why');
   const [bookmarked, setBookmarked] = useState(false);
@@ -123,7 +125,9 @@ export default function DestinationDetail() {
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statItem}>
               <Ionicons name="location-outline" size={14} color={colors.primary} />
-              <Text style={[styles.statValue, { color: colors.text }]}>{dest.dist}</Text>
+              <Text style={[styles.statValue, { color: colors.text }]}>
+                {getFormattedDistance(dest.lat, dest.lng, dest.dist)}
+              </Text>
               <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Distance</Text>
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />

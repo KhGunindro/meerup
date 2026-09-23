@@ -1,4 +1,4 @@
-"""Curated, fact-only content and fallback storytelling for landmarks supported by the vision model."""
+from __future__ import annotations
 
 from dataclasses import dataclass
 

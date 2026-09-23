@@ -62,6 +62,15 @@ export default function RootLayout() {
             headerShown: false,
           }}
         />
+        {/* 2-Person Speech-to-Speech Translator — hidden from bottom tab bar */}
+        <Tabs.Screen
+          name="conversation"
+          options={{
+            href: null,
+            headerShown: false,
+            tabBarStyle: { display: 'none' },
+          }}
+        />
       </Tabs>
     </ThemeProvider>
     </AuthProvider>

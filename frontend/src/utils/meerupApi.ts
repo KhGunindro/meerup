@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 // Determine host: Physical device via Expo uses Metro host IP, emulator uses 10.0.2.2
@@ -16,14 +17,11 @@ export const TRANSLATION_API_BASE_URL = `http://${HOST}:8000`;
 export const BACKEND_API_BASE_URL = `http://${HOST}:8001`;
 
 // ─── Backend URL Configuration ────────────────────────────────────────────────
-// Web / iOS simulator use localhost:8000; Android emulator uses 10.0.2.2:8000
-const DEFAULT_HOST = Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://localhost:8000';
-
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ||
   (typeof window !== 'undefined' && window.location?.hostname
-    ? `http://${window.location.hostname}:8000`
-    : DEFAULT_HOST);
+    ? `http://${window.location.hostname}:8001`
+    : BACKEND_API_BASE_URL);
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 export interface ApiResponse {

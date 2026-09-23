@@ -1194,11 +1194,17 @@ export default function MeerupScreen() {
         </View>
       )}
 
-      {/* LANDMARK CAMERA MODAL */}
+      {/* LANDMARK AR CAMERA MODAL */}
       <LandmarkCameraModal
         visible={cameraModalVisible}
         onClose={() => setCameraModalVisible(false)}
         onLandmarkDetected={handleLandmarkDetected}
+        onSpeechInteraction={(landmark) => {
+          handleLandmarkDetected(landmark);
+          setCameraModalVisible(false);
+          setIsMicMuted(false);
+          setIsVoiceMode(true);
+        }}
       />
     </KeyboardAvoidingView>
   );

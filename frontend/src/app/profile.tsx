@@ -141,20 +141,7 @@ export default function ProfileScreen() {
         if (p && p.place_name) mergedPlacesMap.set(p.place_name, p);
       });
 
-      // 6. Ensure any saved trip also appears as a saved place if not already present
-      finalTrips.forEach((t) => {
-        if (t && t.destination_name && !mergedPlacesMap.has(t.destination_name)) {
-          mergedPlacesMap.set(t.destination_name, {
-            id: `place_${t.id}`,
-            user_id: t.user_id || currentUserId,
-            place_name: t.destination_name,
-            latitude: t.dest_lat,
-            longitude: t.dest_lng,
-            category: 'Destination',
-            created_at: t.created_at,
-          });
-        }
-      });
+      // (Step 6 removed: Trips and Places are completely independent now)
 
       const finalSavedPlaces = Array.from(mergedPlacesMap.values());
       setSavedPlaces(finalSavedPlaces);

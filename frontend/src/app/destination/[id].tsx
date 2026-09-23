@@ -145,6 +145,7 @@ export default function DestinationDetail() {
             guide={dest.audioGuide}
             colors={colors}
             isDark={isDark}
+            destinationName={dest.name}
           />
         )}
 

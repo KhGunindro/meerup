@@ -5,37 +5,302 @@ import {
   Text,
   TouchableOpacity,
   Platform,
-  Animated,
-  Easing,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
 import { AudioGuide } from '@/constants/destinations';
 import { Colors } from '@/constants/theme';
+import {
+  synthesizeTextToSpeech,
+  fetchAutoAudioTranscript,
+  fetchPregeneratedAudioGuide,
+} from '@/utils/meerupApi';
+import { PREGENERATED_STORIES, getPregeneratedAudio } from '@/constants/pregeneratedStories';
+
+// Safely require expo-av runtime
+let AudioRuntime: any = null;
+try {
+  AudioRuntime = require('expo-av').Audio;
+} catch (e) {
+  // expo-av fallback handled
+}
 
 interface AudioGuidePlayerProps {
   guide: AudioGuide;
   colors: (typeof Colors)['light' | 'dark'];
   isDark: boolean;
+  destinationName?: string;
+  destinationId?: string;
 }
 
-export function AudioGuidePlayer({ guide, colors, isDark }: AudioGuidePlayerProps) {
+export function AudioGuidePlayer({
+  guide,
+  colors,
+  isDark,
+  destinationName,
+  destinationId,
+}: AudioGuidePlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentSec, setCurrentSec] = useState(0);
-  const [selectedLang, setSelectedLang] = useState(guide.languages[0]?.code || 'en');
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
-  const [showTranscript, setShowTranscript] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [isLoadingTranscript, setIsLoadingTranscript] = useState(false);
+  const [selectedLang, setSelectedLang] = useState<'en' | 'mni'>('en');
 
-  const totalSec = guide.durationSec || 180;
-  const timerRef = useRef<any>(null);
+  // Match pregenerated guide key (e.g. kangla-fort, loktak-lake, ima-keithel, etc.)
+  const guideKey = (destinationId || guide.title || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '-');
+  const matchedPregenKey =
+    Object.keys(PREGENERATED_STORIES).find(
+      (k) => guideKey.includes(k) || k.includes(guideKey)
+    ) || '';
 
-  // Active language text
+  const pregenStory = matchedPregenKey ? PREGENERATED_STORIES[matchedPregenKey] : null;
+
+  // Initialize transcripts directly from pregenerated stories for instant 0ms render
+  const [autoTranscripts, setAutoTranscripts] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    if (pregenStory) {
+      initial.en = pregenStory.transcriptEn;
+      initial.mni = pregenStory.transcriptMni;
+    }
+    return initial;
+  });
+
+  // Sound instance references
+  const nativeSoundRef = useRef<any>(null);
+  const webAudioRef = useRef<any>(null);
+  // Cache base64 audio per language so repeat plays are instant
+  const audioCacheRef = useRef<Record<string, string>>({});
+
+  // Pre-seed audioCache from pregenerated store immediately
+  useEffect(() => {
+    if (matchedPregenKey) {
+      const enAudio = getPregeneratedAudio(matchedPregenKey, 'en');
+      const mniAudio = getPregeneratedAudio(matchedPregenKey, 'mni');
+      if (enAudio) audioCacheRef.current['en'] = enAudio;
+      if (mniAudio) audioCacheRef.current['mni'] = mniAudio;
+
+      // Also ensure backend pregenerated fallback is ready if needed
+      if (!audioCacheRef.current[selectedLang]) {
+        fetchPregeneratedAudioGuide(matchedPregenKey, selectedLang)
+          .then((res) => {
+            if (res?.audioBase64) {
+              audioCacheRef.current[selectedLang] = res.audioBase64;
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [matchedPregenKey, selectedLang]);
+
+  // Fallback language object if offline
   const activeLangObj =
     guide.languages.find((l) => l.code === selectedLang) || guide.languages[0];
 
-  // Soundwave animated bars
-  const waveHeights = [14, 26, 18, 34, 22, 38, 16, 28, 32, 20, 36, 18, 24];
+  // Auto-generate narration transcript from AI model on demand
+  const getOrFetchTranscript = async (lang: 'en' | 'mni', forceRefresh = false): Promise<string> => {
+    if (!forceRefresh && autoTranscripts[lang]) {
+      return autoTranscripts[lang];
+    }
+    setIsLoadingTranscript(true);
+    try {
+      const res = await fetchAutoAudioTranscript(
+        guide.title,
+        destinationName,
+        undefined,
+        lang
+      );
+      if (res && res.transcript) {
+        setAutoTranscripts((prev) => ({ ...prev, [lang]: res.transcript }));
+        return res.transcript;
+      }
+    } catch (e) {
+      console.warn('Auto transcript generation notice:', e);
+    } finally {
+      setIsLoadingTranscript(false);
+    }
+    return activeLangObj?.text || guide.title;
+  };
 
-  // Play / Pause toggle with speech synthesis support on Web
+  // If no pregenerated story exists, request model transcript on mount and on language toggle
+  useEffect(() => {
+    if (!autoTranscripts[selectedLang]) {
+      getOrFetchTranscript(selectedLang);
+    }
+  }, [selectedLang, guide.title]);
+
+  const activeTranscript =
+    autoTranscripts[selectedLang] ||
+    activeLangObj?.text ||
+    `Welcome to ${guide.title}. Explore the sacred history, mythical lore, and timeless heritage of Manipur.`;
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopAllAudio();
+    };
+  }, []);
+
+  const stopAllAudio = async () => {
+    if (webAudioRef.current) {
+      try {
+        webAudioRef.current.pause();
+        webAudioRef.current.currentTime = 0;
+      } catch (e) {}
+      webAudioRef.current = null;
+    }
+    if (nativeSoundRef.current) {
+      try {
+        await nativeSoundRef.current.stopAsync();
+        await nativeSoundRef.current.unloadAsync();
+      } catch (e) {}
+      nativeSoundRef.current = null;
+    }
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as any).speechSynthesis) {
+      (window as any).speechSynthesis.cancel();
+    }
+  };
+
+  // Play audio synthesized by AI4Bharat / Neural model from the auto-generated transcript
+  const playAudio = async () => {
+    if (nativeSoundRef.current) {
+      try {
+        await nativeSoundRef.current.playAsync();
+        setIsPlaying(true);
+        return;
+      } catch (e) {}
+    }
+    if (webAudioRef.current) {
+      try {
+        await webAudioRef.current.play();
+        setIsPlaying(true);
+        return;
+      } catch (e) {}
+    }
+
+    await stopAllAudio();
+    setIsLoadingAudio(true);
+
+    try {
+      let transcriptText = autoTranscripts[selectedLang];
+      if (!transcriptText) {
+        transcriptText = await getOrFetchTranscript(selectedLang);
+      }
+
+      let b64 = audioCacheRef.current[selectedLang];
+      if (!b64 && matchedPregenKey) {
+        const localAudio = getPregeneratedAudio(matchedPregenKey, selectedLang);
+        if (localAudio) {
+          b64 = localAudio;
+          audioCacheRef.current[selectedLang] = b64;
+        }
+      }
+      if (!b64 && matchedPregenKey) {
+        try {
+          const pregenRes = await fetchPregeneratedAudioGuide(matchedPregenKey, selectedLang);
+          if (pregenRes?.audioBase64) {
+            b64 = pregenRes.audioBase64;
+            audioCacheRef.current[selectedLang] = b64;
+          }
+        } catch (e) {}
+      }
+      if (!b64) {
+        const result = await synthesizeTextToSpeech(transcriptText, selectedLang, 'female');
+        if (result.audioBase64) {
+          b64 = result.audioBase64;
+          audioCacheRef.current[selectedLang] = b64;
+        }
+      }
+
+      if (b64) {
+        const cleanB64 = b64.includes(',') ? b64.split(',')[1] : b64;
+
+        // 1. Web Audio
+        if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as any).Audio) {
+          const snd = new (window as any).Audio(`data:audio/wav;base64,${cleanB64}`);
+          webAudioRef.current = snd;
+
+          snd.onended = () => {
+            setIsPlaying(false);
+          };
+
+          await snd.play();
+          setIsPlaying(true);
+          setIsLoadingAudio(false);
+          return;
+        }
+
+        // 2. Native expo-av Sound
+        if (AudioRuntime && FileSystem.cacheDirectory) {
+          try {
+            await AudioRuntime.setAudioModeAsync({
+              allowsRecordingIOS: false,
+              playsInSilentModeIOS: true,
+              staysActiveInBackground: false,
+              shouldDuckAndroid: true,
+            });
+
+            const tempUri = `${FileSystem.cacheDirectory}guide_${guide.title.replace(/[^a-zA-Z0-9]/g, '_')}_${selectedLang}.wav`;
+            await FileSystem.writeAsStringAsync(tempUri, cleanB64, {
+              encoding: FileSystem.EncodingType?.Base64 || 'base64',
+            });
+
+            const { sound } = await AudioRuntime.Sound.createAsync(
+              { uri: tempUri },
+              { shouldPlay: true, shouldCorrectPitch: true },
+              (status: any) => {
+                if (status.isLoaded && status.didJustFinish) {
+                  setIsPlaying(false);
+                }
+              }
+            );
+
+            nativeSoundRef.current = sound;
+            setIsPlaying(true);
+            setIsLoadingAudio(false);
+            return;
+          } catch (nativeErr) {
+            console.warn('Native Audio Guide playback notice:', nativeErr);
+          }
+        }
+      }
+    } catch (apiErr) {
+      console.warn('AI TTS Model request notice:', apiErr);
+    }
+
+    // 3. Fallback Web SpeechSynthesis
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(activeTranscript);
+      utterance.lang = selectedLang === 'mni' ? 'hi-IN' : 'en-US';
+      utterance.onend = () => {
+        setIsPlaying(false);
+      };
+      window.speechSynthesis.speak(utterance);
+      setIsPlaying(true);
+    }
+
+    setIsLoadingAudio(false);
+  };
+
+  const pauseAudio = async () => {
+    setIsPlaying(false);
+    if (webAudioRef.current) {
+      try {
+        webAudioRef.current.pause();
+      } catch (e) {}
+    }
+    if (nativeSoundRef.current) {
+      try {
+        await nativeSoundRef.current.pauseAsync();
+      } catch (e) {}
+    }
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && (window as any).speechSynthesis) {
+      (window as any).speechSynthesis.cancel();
+    }
+  };
+
   const togglePlay = () => {
     if (isPlaying) {
       pauseAudio();
@@ -44,391 +309,301 @@ export function AudioGuidePlayer({ guide, colors, isDark }: AudioGuidePlayerProp
     }
   };
 
-  const playAudio = () => {
-    setIsPlaying(true);
-    // On web, use SpeechSynthesis if available
-    if (Platform.OS === 'web' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(activeLangObj.text);
-      utterance.rate = playbackSpeed;
-      utterance.lang = selectedLang === 'mni' ? 'hi-IN' : 'en-US';
-      utterance.onend = () => {
-        setIsPlaying(false);
-        setCurrentSec(0);
-      };
-      window.speechSynthesis.speak(utterance);
-    }
-  };
-
-  const pauseAudio = () => {
+  const handleLangChange = async (langCode: 'en' | 'mni') => {
+    if (langCode === selectedLang) return;
+    await stopAllAudio();
     setIsPlaying(false);
-    if (Platform.OS === 'web' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
+    setSelectedLang(langCode);
   };
 
-  // Timer interval to progress elapsed seconds
-  useEffect(() => {
-    if (isPlaying) {
-      timerRef.current = setInterval(() => {
-        setCurrentSec((prev) => {
-          if (prev >= totalSec) {
-            pauseAudio();
-            return 0;
-          }
-          return prev + 1;
-        });
-      }, 1000 / playbackSpeed);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isPlaying, playbackSpeed, totalSec]);
-
-  // Clean up speech synthesis on unmount
-  useEffect(() => {
-    return () => {
-      if (Platform.OS === 'web' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-    };
-  }, []);
-
-  // Format MM:SS
-  const formatTime = (sec: number) => {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  const handleRegenerate = async () => {
+    await stopAllAudio();
+    setIsPlaying(false);
+    delete audioCacheRef.current[selectedLang];
+    await getOrFetchTranscript(selectedLang, true);
   };
 
-  const seekRelative = (diff: number) => {
-    setCurrentSec((prev) => Math.max(0, Math.min(totalSec, prev + diff)));
-  };
-
-  const cycleSpeed = () => {
-    const speeds = [1.0, 1.25, 1.5];
-    const nextIdx = (speeds.indexOf(playbackSpeed) + 1) % speeds.length;
-    setPlaybackSpeed(speeds[nextIdx]);
-    if (isPlaying && Platform.OS === 'web' && 'speechSynthesis' in window) {
-      pauseAudio();
-      setTimeout(playAudio, 100);
-    }
-  };
-
-  const progressPercent = Math.min(100, (currentSec / totalSec) * 100);
-
-  const cardBg = isDark ? '#1C1D24' : '#FFFFFF';
-  const innerBg = isDark ? '#14151B' : '#F8F9FA';
+  // Theme palettes
+  const cardBg = isDark ? '#111319' : '#FFFFFF';
+  const cardBorder = isDark ? '#232733' : '#E2E8F0';
+  const glassInner = isDark ? '#181B24' : '#F8FAFC';
+  const accentTeal = '#0D9488';
 
   return (
-    <View style={[styles.container, { backgroundColor: cardBg, borderColor: colors.border }]}>
-      {/* Header Row */}
-      <View style={styles.headerRow}>
-        <View style={styles.badgeRow}>
-          <View style={[styles.audioIconCircle, { backgroundColor: isDark ? 'rgba(15,118,110,0.2)' : '#E6F4F1' }]}>
-            <Ionicons name="headset" size={17} color={colors.primary} />
-          </View>
-          <View>
-            <Text style={[styles.companionTag, { color: colors.primary }]}>AUDIO COMPANION</Text>
-            <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-              {guide.title}
+    <View style={[styles.cardContainer, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+      {/* ── Top Header with Tag & Language Toggle ──────────────────────────── */}
+      <View style={styles.topHeader}>
+        <View style={styles.aiBadge}>
+          <View style={[styles.aiDot, { backgroundColor: isPlaying ? '#10B981' : accentTeal }]} />
+          <Text style={styles.aiBadgeText}>AUDIO COMPANION</Text>
+        </View>
+
+        {/* Language Segmented Toggle */}
+        <View style={[styles.langSegment, { backgroundColor: glassInner, borderColor: cardBorder }]}>
+          <TouchableOpacity
+            style={[
+              styles.langPill,
+              selectedLang === 'en' && { backgroundColor: accentTeal },
+            ]}
+            onPress={() => handleLangChange('en')}
+            activeOpacity={0.8}>
+            <Text
+              style={[
+                styles.langPillText,
+                { color: selectedLang === 'en' ? '#FFFFFF' : (isDark ? '#94A3B8' : '#64748B') },
+              ]}>
+              English
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.langPill,
+              selectedLang === 'mni' && { backgroundColor: accentTeal },
+            ]}
+            onPress={() => handleLangChange('mni')}
+            activeOpacity={0.8}>
+            <Text
+              style={[
+                styles.langPillText,
+                { color: selectedLang === 'mni' ? '#FFFFFF' : (isDark ? '#94A3B8' : '#64748B') },
+              ]}>
+              ꯃৈতৈꯂꯣꯟ (Manipuri)
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* ── Title (No Dr. Sanatombi Devi line) ───────────────────────────────── */}
+      <View style={styles.titleSection}>
+        <Text style={[styles.mainTitle, { color: isDark ? '#F8FAFC' : '#0F172A' }]} numberOfLines={2}>
+          {guide.title}
+        </Text>
+      </View>
+
+      {/* ── Auto-Generated Transcript Card ─────────────────────────────────── */}
+      <View style={[styles.transcriptContainer, { backgroundColor: glassInner, borderColor: cardBorder }]}>
+        <View style={styles.transcriptMetaRow}>
+          <View style={styles.transcriptLiveTag}>
+            <Ionicons name="sparkles" size={13} color={accentTeal} />
+            <Text style={styles.transcriptTagText}>
+              {selectedLang === 'mni' ? 'AI ꯃꯣꯗꯦꯜ ꯇ꯭ꯔꯥꯟꯁꯀ꯭ꯔꯤꯞ' : 'AI MODEL TRANSCRIPT'}
             </Text>
           </View>
-        </View>
 
-        {/* Speed Pill */}
-        <TouchableOpacity
-          style={[styles.speedPill, { borderColor: colors.border, backgroundColor: innerBg }]}
-          onPress={cycleSpeed}>
-          <Text style={[styles.speedText, { color: colors.text }]}>{playbackSpeed}x</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Text style={[styles.narratorText, { color: colors.textSecondary }]}>
-        {guide.narrator}
-      </Text>
-
-      {/* Language Switcher */}
-      <View style={styles.langRow}>
-        {guide.languages.map((lang) => {
-          const isSelected = lang.code === selectedLang;
-          return (
-            <TouchableOpacity
-              key={lang.code}
-              onPress={() => {
-                if (isSelected) return;
-                pauseAudio();
-                setSelectedLang(lang.code);
-                setCurrentSec(0);
-              }}
-              style={[
-                styles.langChip,
-                isSelected
-                  ? { backgroundColor: colors.primary, borderColor: colors.primary }
-                  : { backgroundColor: innerBg, borderColor: colors.border },
-              ]}>
-              <Text
-                style={[
-                  styles.langChipText,
-                  { color: isSelected ? '#FFFFFF' : colors.textSecondary, fontWeight: isSelected ? '700' : '500' },
-                ]}>
-                {lang.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* Animated Soundwave & Progress Area */}
-      <View style={[styles.waveContainer, { backgroundColor: innerBg, borderColor: colors.border }]}>
-        <View style={styles.barsRow}>
-          {waveHeights.map((h, i) => (
-            <View
-              key={i}
-              style={[
-                styles.waveBar,
-                {
-                  height: isPlaying ? h * (0.6 + ((i % 4) * 0.15)) : 6,
-                  backgroundColor: i / waveHeights.length <= progressPercent / 100 ? colors.primary : colors.border,
-                },
-              ]}
+          {/* Regenerate Story Button */}
+          <TouchableOpacity
+            style={styles.regenerateBtn}
+            onPress={handleRegenerate}
+            disabled={isLoadingTranscript}
+            activeOpacity={0.7}>
+            <Ionicons
+              name="refresh"
+              size={12}
+              color={isLoadingTranscript ? '#94A3B8' : accentTeal}
             />
-          ))}
+            <Text style={[styles.regenerateText, { color: accentTeal }]}>New Story</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Scrubber Bar */}
-        <View style={[styles.scrubberTrack, { backgroundColor: isDark ? '#272832' : '#E5E7EB' }]}>
-          <View
-            style={[styles.scrubberFill, { width: `${progressPercent}%`, backgroundColor: colors.primary }]}
-          />
-        </View>
-
-        {/* Time stamps */}
-        <View style={styles.timeRow}>
-          <Text style={[styles.timeText, { color: colors.textSecondary }]}>{formatTime(currentSec)}</Text>
-          <Text style={[styles.timeText, { color: colors.textSecondary }]}>{guide.duration}</Text>
-        </View>
+        {isLoadingTranscript && !autoTranscripts[selectedLang] ? (
+          <View style={styles.transcriptLoader}>
+            <ActivityIndicator size="small" color={accentTeal} />
+            <Text style={[styles.loaderText, { color: isDark ? '#94A3B8' : '#64748B' }]}>
+              {selectedLang === 'mni'
+                ? 'AI ꯃꯣꯗꯦꯜꯅ ꯃꯅꯤꯄꯨꯔꯤ ꯋꯥꯔꯤ ꯁꯦꯝꯂꯤ...'
+                : 'Composing story transcript with AI model...'}
+            </Text>
+          </View>
+        ) : (
+          <Text
+            style={[
+              styles.transcriptContentText,
+              {
+                color: isDark ? '#CBD5E1' : '#334155',
+                lineHeight: selectedLang === 'mni' ? 24 : 22,
+                fontSize: selectedLang === 'mni' ? 14 : 13.5,
+              },
+            ]}>
+            "{activeTranscript}"
+          </Text>
+        )}
       </View>
 
-      {/* Controls Bar */}
-      <View style={styles.controlsRow}>
-        {/* Rewind 15s */}
-        <TouchableOpacity
-          style={styles.seekBtn}
-          onPress={() => seekRelative(-15)}
-          accessibilityLabel="Rewind 15 seconds">
-          <Ionicons name="play-back" size={20} color={colors.text} />
-          <Text style={[styles.seekBtnText, { color: colors.textSecondary }]}>-15s</Text>
-        </TouchableOpacity>
-
-        {/* Main Play/Pause Button */}
-        <TouchableOpacity
-          style={[styles.playBtn, { backgroundColor: colors.primary }]}
-          onPress={togglePlay}
-          accessibilityLabel={isPlaying ? 'Pause Audio Guide' : 'Play Audio Guide'}>
-          <Ionicons name={isPlaying ? 'pause' : 'play'} size={24} color="#FFFFFF" style={{ marginLeft: isPlaying ? 0 : 2 }} />
-        </TouchableOpacity>
-
-        {/* Forward 15s */}
-        <TouchableOpacity
-          style={styles.seekBtn}
-          onPress={() => seekRelative(15)}
-          accessibilityLabel="Fast forward 15 seconds">
-          <Ionicons name="play-forward" size={20} color={colors.text} />
-          <Text style={[styles.seekBtnText, { color: colors.textSecondary }]}>+15s</Text>
-        </TouchableOpacity>
-
-        {/* Transcript Toggle */}
-        <TouchableOpacity
-          style={[styles.transcriptBtn, { borderColor: colors.border, backgroundColor: innerBg }]}
-          onPress={() => setShowTranscript((prev) => !prev)}>
-          <Ionicons name="document-text-outline" size={15} color={showTranscript ? colors.primary : colors.textSecondary} />
-          <Text style={[styles.transcriptBtnText, { color: showTranscript ? colors.primary : colors.textSecondary }]}>
-            Transcript
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Expandable Transcript Drawer */}
-      {showTranscript && (
-        <View style={[styles.transcriptBox, { backgroundColor: innerBg, borderColor: colors.border }]}>
-          <Text style={[styles.transcriptTitle, { color: colors.text }]}>Narration Transcript</Text>
-          <Text style={[styles.transcriptText, { color: colors.textSecondary }]}>
-            "{activeLangObj.text}"
-          </Text>
-        </View>
-      )}
+      {/* ── Only Play Button (No Scrubber, No Bars, No Speed, No -15s/+15s) ─── */}
+      <TouchableOpacity
+        style={[
+          styles.masterPlayBtn,
+          {
+            backgroundColor: isPlaying ? (isDark ? '#1E293B' : '#F1F5F9') : accentTeal,
+            borderColor: isPlaying ? accentTeal : 'transparent',
+          },
+        ]}
+        onPress={togglePlay}
+        disabled={isLoadingAudio}
+        activeOpacity={0.85}
+        accessibilityLabel={isPlaying ? 'Pause Narration' : 'Play Narration'}>
+        {isLoadingAudio ? (
+          <View style={styles.playBtnInner}>
+            <ActivityIndicator size="small" color={isPlaying ? accentTeal : '#FFFFFF'} />
+            <Text style={[styles.playBtnText, { color: isPlaying ? accentTeal : '#FFFFFF' }]}>
+              {selectedLang === 'mni' ? 'ꯈꯣꯟꯊꯣꯛ ꯁꯦꯝꯂꯤ...' : 'Generating Voice...'}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.playBtnInner}>
+            <Ionicons
+              name={isPlaying ? 'pause-circle' : 'play-circle'}
+              size={24}
+              color={isPlaying ? accentTeal : '#FFFFFF'}
+            />
+            <Text style={[styles.playBtnText, { color: isPlaying ? accentTeal : '#FFFFFF' }]}>
+              {isPlaying
+                ? (selectedLang === 'mni' ? 'ꯂꯦꯞꯄꯨ (Pause)' : 'Pause Narration')
+                : (selectedLang === 'mni' ? 'ꯋꯥꯔꯤ ꯇꯥꯕꯤꯌꯨ (Play Story)' : 'Play Story Narration')}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    marginHorizontal: 20,
-    marginTop: 16,
-    borderRadius: 20,
+  cardContainer: {
+    marginHorizontal: 16,
+    marginTop: 18,
+    borderRadius: 22,
     borderWidth: 1,
-    padding: 16,
+    padding: 18,
     elevation: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
-    shadowRadius: 6,
+    shadowRadius: 8,
   },
-  headerRow: {
+  topHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
   },
-  badgeRow: {
+  aiBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    flex: 1,
+    gap: 6,
+    backgroundColor: 'rgba(13, 148, 136, 0.12)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 12,
   },
-  audioIconCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
+  aiDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
-  companionTag: {
-    fontSize: 9.5,
+  aiBadgeText: {
+    fontSize: 10,
     fontWeight: '800',
+    color: '#0D9488',
     letterSpacing: 0.8,
   },
-  title: {
-    fontSize: 15,
-    fontWeight: '700',
-    marginTop: 1,
-  },
-  narratorText: {
-    fontSize: 12,
-    marginTop: 6,
-    marginLeft: 48,
-  },
-  speedPill: {
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 12,
+  langSegment: {
+    flexDirection: 'row',
+    borderRadius: 14,
     borderWidth: 1,
+    padding: 3,
+    gap: 4,
   },
-  speedText: {
+  langPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  langPillText: {
     fontSize: 11,
     fontWeight: '700',
   },
-  langRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
-    paddingTop: 8,
-  },
-  langChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 14,
-    borderWidth: 1,
-  },
-  langChipText: {
-    fontSize: 11.5,
-  },
-  waveContainer: {
-    marginTop: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 12,
-  },
-  barsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    height: 38,
-    paddingHorizontal: 8,
-  },
-  waveBar: {
-    width: 4,
-    borderRadius: 2,
-    transition: 'height 0.2s ease',
-  } as any,
-  scrubberTrack: {
-    height: 4,
-    borderRadius: 2,
-    width: '100%',
-    marginTop: 8,
-    overflow: 'hidden',
-  },
-  scrubberFill: {
-    height: '100%',
-    borderRadius: 2,
-  },
-  timeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 6,
-  },
-  timeText: {
-    fontSize: 10.5,
-    fontWeight: '600',
-  },
-  controlsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  titleSection: {
     marginTop: 14,
-    paddingHorizontal: 8,
+    marginBottom: 10,
   },
-  seekBtn: {
+  mainTitle: {
+    fontSize: 16.5,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+  transcriptContainer: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 14,
+  },
+  transcriptMetaRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-    padding: 4,
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
-  seekBtnText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  playBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 5,
-  },
-  transcriptBtn: {
+  transcriptLiveTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 14,
-    borderWidth: 1,
   },
-  transcriptBtnText: {
-    fontSize: 11,
-    fontWeight: '600',
+  transcriptTagText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#0D9488',
+    letterSpacing: 0.8,
   },
-  transcriptBox: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
+  regenerateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(13, 148, 136, 0.1)',
   },
-  transcriptTitle: {
-    fontSize: 12,
+  regenerateText: {
+    fontSize: 10.5,
     fontWeight: '700',
   },
-  transcriptText: {
-    fontSize: 12.5,
-    lineHeight: 19,
+  transcriptLoader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+  },
+  loaderText: {
+    fontSize: 12,
     fontStyle: 'italic',
+  },
+  transcriptContentText: {
+    fontStyle: 'italic',
+  },
+  masterPlayBtn: {
+    borderRadius: 16,
+    borderWidth: 1.5,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#0D9488',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+  },
+  playBtnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  playBtnText: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 });

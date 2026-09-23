@@ -619,3 +619,70 @@ export const askGroundedChat = async (
   return await response.json();
 };
 
+export interface AudioGuideTranscriptResult {
+  success: boolean;
+  title: string;
+  language: string;
+  transcript: string;
+  narrator: string;
+  provider: string;
+}
+
+/**
+ * Dynamically generates cultural audio guide narration transcripts via the AI model.
+ * Eliminates need for hardcoded preloaded text.
+ */
+export const fetchAutoAudioTranscript = async (
+  title: string,
+  destinationName?: string,
+  narrator?: string,
+  language: 'en' | 'mni' = 'en'
+): Promise<AudioGuideTranscriptResult> => {
+  const url = `${API_BASE_URL}/api/chat/audio-guide/transcript`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...NGROK_HEADERS,
+    },
+    body: JSON.stringify({
+      title,
+      destination_name: destinationName,
+      narrator,
+      language,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Auto transcript API error (${response.status})`);
+  }
+  return await response.json();
+};
+
+export interface PregeneratedGuideResponse {
+  success: boolean;
+  guideId: string;
+  title: string;
+  language: string;
+  transcript: string;
+  audioBase64: string;
+}
+
+export const fetchPregeneratedAudioGuide = async (
+  guideId: string,
+  language: 'en' | 'mni' = 'en'
+): Promise<PregeneratedGuideResponse> => {
+  const url = `${API_BASE_URL}/api/chat/audio-guide/pregenerated/${encodeURIComponent(guideId)}?lang=${language}`;
+  const response = await fetch(url, {
+    headers: {
+      ...NGROK_HEADERS,
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Pregenerated audio guide API error (${response.status})`);
+  }
+  return await response.json();
+};
+
+
+
